@@ -25,7 +25,9 @@ def random_split(df, val_frac=0.25, seed=0):
     """Shuffle rows and hold out val_frac as a validation set. Fixed seed = same split every run."""
     idx = np.random.default_rng(seed).permutation(len(df))
     n_val = int(len(df) * val_frac)
-    return df.iloc[idx[n_val:]].reset_index(drop=True), df.iloc[idx[:n_val]].reset_index(drop=True)
+    return df.iloc[idx[n_val:]].reset_index(drop=True), df.iloc[
+        idx[:n_val]
+    ].reset_index(drop=True)
 
 
 def holdout_last_per_user(df, time_col="timestamp"):
@@ -41,12 +43,14 @@ def write_predictions(test_name, preds, out_dir="dist", data_dir=None):
     header, rows = lines[0], [line for line in lines[1:] if line.strip()]
     preds = list(preds)
     if len(preds) != len(rows):
-        raise ValueError(f"{test_name}: {len(rows)} test rows but {len(preds)} predictions")
+        raise ValueError(
+            f"{test_name}: {len(rows)} test rows but {len(preds)} predictions"
+        )
 
     out_path = Path(out_dir) / test_name.replace("_test", "_predictions")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
         f.write(header + "\n")
-        for line, p in zip(rows, preds):
-            f.write(f"{line.strip()},{p}\n")
+        f.writelines(f"{line.strip()},{p}\n" for line, p in zip(rows, preds))
+
     return out_path

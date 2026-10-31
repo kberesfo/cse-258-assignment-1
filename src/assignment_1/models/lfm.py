@@ -12,7 +12,9 @@ from surprise import SVD, Dataset, Reader
 def to_surprise_trainset(df, rating_scale):
     """DataFrame with user/item/rating columns -> Surprise trainset using every row."""
     reader = Reader(rating_scale=rating_scale)
-    return Dataset.load_from_df(df[["user", "item", "rating"]], reader).build_full_trainset()
+    return Dataset.load_from_df(
+        df[["user", "item", "rating"]], reader
+    ).build_full_trainset()
 
 
 def fit_svd(train_df, rating_scale=None, seed=0, **svd_params):

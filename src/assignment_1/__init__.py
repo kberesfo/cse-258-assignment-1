@@ -13,7 +13,7 @@ import pkgutil
 
 def available_tasks():
     """Task numbers N for which src/assignment_1/tasks/taskN.py exists."""
-    from assignment_1 import tasks
+    from assignment_1.modules import tasks
 
     return sorted(
         int(m.name.removeprefix("task"))
@@ -23,9 +23,15 @@ def available_tasks():
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="assignment-1", description="Generate task prediction files.")
-    parser.add_argument("tasks", nargs="*", type=int, help="task numbers (default: all implemented)")
-    parser.add_argument("--data-dir", default=None, help="default: $A1_DATA_DIR or ./data")
+    parser = argparse.ArgumentParser(
+        prog="assignment-1", description="Generate task prediction files."
+    )
+    parser.add_argument(
+        "tasks", nargs="*", type=int, help="task numbers (default: all implemented)"
+    )
+    parser.add_argument(
+        "--data-dir", default=None, help="default: $A1_DATA_DIR or ./data"
+    )
     parser.add_argument("--out-dir", default="dist")
     args = parser.parse_args(argv)
 

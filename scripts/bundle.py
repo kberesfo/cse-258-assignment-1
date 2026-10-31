@@ -39,13 +39,19 @@ def is_internal(node):
 def check_internal_import(node, path):
     where = f"{path.relative_to(ROOT)}:{node.lineno}"
     if isinstance(node, ast.Import) or node.level > 0:
-        sys.exit(f"bundle: {where}: use absolute `from {PKG_NAME}.module import name` imports")
+        sys.exit(
+            f"bundle: {where}: use absolute `from {PKG_NAME}.module import name` imports"
+        )
     for alias in node.names:
         if alias.asname:
-            sys.exit(f"bundle: {where}: don't rename internal imports (`as {alias.asname}`)")
+            sys.exit(
+                f"bundle: {where}: don't rename internal imports (`as {alias.asname}`)"
+            )
         mod_path = PKG.joinpath(*node.module.split(".")[1:], alias.name)
         if mod_path.with_suffix(".py").exists() or mod_path.is_dir():
-            sys.exit(f"bundle: {where}: import names from modules, not modules (`{alias.name}`)")
+            sys.exit(
+                f"bundle: {where}: import names from modules, not modules (`{alias.name}`)"
+            )
 
 
 def is_main_guard(node):
@@ -99,33 +105,47 @@ def header(title):
 
 
 def main():
-    out = (Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "dist" / "assignment1.py").resolve()
+    out = (
+        Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "dist" / "assignment1.py"
+    ).resolve()
     shared, tasks = module_order()
     imports, owners, sections = [], {}, []
 
     for p in shared:
-        sections.append(header(f"Shared code: {p.relative_to(PKG)}") + "\n" + process(p, imports, owners))
+        sections.append(
+            header(f"Shared code: {p.relative_to(PKG)}")
+            + "\n"
+            + process(p, imports, owners)
+        )
     run_fns = []
     for p in tasks:
         n = int(p.stem[4:])
         doc = ast.get_docstring(ast.parse(p.read_text())) or f"Task {n}"
-        sections.append(header(doc.splitlines()[0]) + "\n" + process(p, imports, owners))
+        sections.append(
+            header(doc.splitlines()[0]) + "\n" + process(p, imports, owners)
+        )
         if f"run_task{n}" not in owners:
-            sys.exit(f"bundle: {p.relative_to(ROOT)} must define run_task{n}(data_dir, out_dir)")
+            sys.exit(
+                f"bundle: {p.relative_to(ROOT)} must define run_task{n}(data_dir, out_dir)"
+            )
         run_fns.append(f"run_task{n}")
 
     for name in owners:
         for stmt in imports:
-            if name in {a.asname or a.name.split(".")[0] for a in ast.parse(stmt).body[0].names}:
-                sys.exit(f"bundle: `{name}` is both defined in the package and imported by `{stmt}`")
+            if name in {
+                a.asname or a.name.split(".")[0] for a in ast.parse(stmt).body[0].names
+            }:
+                sys.exit(
+                    f"bundle: `{name}` is both defined in the package and imported by `{stmt}`"
+                )
 
     main_block = (
         header("Entry point")
-        + "\nif __name__ == \"__main__\":\n"
+        + '\nif __name__ == "__main__":\n'
         + "    import sys\n\n"
         + "    # python assignment1.py [data_dir] [out_dir]\n"
-        + "    data_dir = sys.argv[1] if len(sys.argv) > 1 else \"data\"\n"
-        + "    out_dir = sys.argv[2] if len(sys.argv) > 2 else \".\"\n"
+        + '    data_dir = sys.argv[1] if len(sys.argv) > 1 else "data"\n'
+        + '    out_dir = sys.argv[2] if len(sys.argv) > 2 else "."\n'
         + f"    for run in ({', '.join(run_fns)},):\n"
         + "        print(run(data_dir, out_dir))\n"
     )
@@ -138,7 +158,9 @@ def main():
     compile(text, str(out), "exec")  # syntax check before writing
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text)
-    print(f"bundle: wrote {out.relative_to(ROOT)} ({len(tasks)} task(s): {', '.join(run_fns)})")
+    print(
+        f"bundle: wrote {out.relative_to(ROOT)} ({len(tasks)} task(s): {', '.join(run_fns)})"
+    )
 
 
 if __name__ == "__main__":
