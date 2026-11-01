@@ -42,12 +42,14 @@ def random_split(
 def holdout_last_per_user(
     df: pd.DataFrame, time_col: str = "timestamp"
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Hold out each user's most recent interaction (time-aware / sequential tasks).
+    """
+    Hold out each user's most recent interaction (time-aware / sequential tasks).
 
     Returns (train, val).
     """
     df = df.sort_values(["user", time_col], kind="stable")
     is_last = ~df["user"].duplicated(keep="last")
+
     return df[~is_last].reset_index(drop=True), df[is_last].reset_index(drop=True)
 
 

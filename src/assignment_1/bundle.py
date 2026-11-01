@@ -2,7 +2,8 @@
 
 Order: shared modules (data, metrics, models/*) then tasks/task1..6, each under a section header.
 - Third-party/stdlib imports are hoisted to the top and de-duplicated.
-- Internal imports (`from assignment_1.x import y`) are dropped, since everything is in one file.
+- Internal imports, absolute (`from assignment_1.modules.x import y`) or relative (`from .x import y`),
+  are dropped, since everything is in one file.
 - Fails loudly on anything concatenation would silently break:
     * two modules defining the same top-level name
     * internal imports that rename (`as`) or import a module object (`from assignment_1 import data`)
@@ -15,23 +16,34 @@ import ast
 import sys
 from pathlib import Path
 
-# src/assignment_1/bundle.py -> repo root
-ROOT = Path(__file__).resolve().parents[3]
-# package root (cli.py, __main__.py: not bundled)
-SRC_PKG = ROOT / "src" / "assignment_1"
-# everything bundled lives here
-PKG = SRC_PKG / "modules"
+ROOT = Path(__file__).resolve().parents[1]
+SRC_PKG = (
+    ROOT / "src" / "assignment_1"
+)  # package root (cli.py, __main__.py: not bundled)
+PKG = SRC_PKG / "modules"  # everything bundled lives here
 PKG_NAME = "assignment_1"
+
+
+def import_target(node, path):
+    """Path (no suffix) of the package module an internal `from X import ...` refers to.
+
+    Handles absolute (`from assignment_1.modules.util.data import f`) and relative
+    (`from .data import f`, `from ..models.bpr import g`) imports.
+    """
+    if node.level > 0:
+        base = path.parent
+        for _ in range(node.level - 1):
+            base = base.parent
+        return base.joinpath(*node.module.split(".")) if node.module else base
+    return SRC_PKG.joinpath(*node.module.split(".")[1:])
 
 
 def internal_deps(path):
     """Files under modules/ that `path` imports from (via `from assignment_1.modules.x import y`)."""
     deps = []
     for node in ast.parse(path.read_text()).body:
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
-            PKG_NAME + "."
-        ):
-            target = SRC_PKG.joinpath(*node.module.split(".")[1:]).with_suffix(".py")
+        if isinstance(node, ast.ImportFrom) and is_internal(node):
+            target = import_target(node, path).with_suffix(".py")
             if target.exists() and target != path:
                 deps.append(target)
     return deps
@@ -62,24 +74,24 @@ def dependency_order(paths):
 
 
 def module_order():
-    shared = [PKG / "data.py", PKG / "metrics.py"]
-    for p in shared + [PKG / "models", PKG / "tasks"]:
-        if not p.exists():
-            sys.exit(
-                f"bundle: expected {p.relative_to(ROOT)} — package layout changed?"
-            )
-    models = sorted(
-        p for p in (PKG / "models").rglob("*.py") if p.name != "__init__.py"
+    tasks_dir = PKG / "tasks"
+    if not tasks_dir.exists():
+        sys.exit(
+            f"bundle: expected {tasks_dir.relative_to(ROOT)} — package layout changed?"
+        )
+    # every library module under modules/ (any depth), except tasks/
+    shared = sorted(
+        p
+        for p in PKG.rglob("*.py")
+        if p.name != "__init__.py" and tasks_dir not in p.parents
     )
     tasks = sorted(
-        (p for p in (PKG / "tasks").glob("task*.py") if p.stem[4:].isdigit()),
+        (p for p in tasks_dir.glob("task*.py") if p.stem[4:].isdigit()),
         key=lambda p: int(p.stem[4:]),
     )
     if not tasks:
-        sys.exit(
-            f"bundle: no tasks/taskN.py found in {(PKG / 'tasks').relative_to(ROOT)}"
-        )
-    library = dependency_order(shared + models)
+        sys.exit(f"bundle: no tasks/taskN.py found in {tasks_dir.relative_to(ROOT)}")
+    library = dependency_order(shared)
     dependency_order(library + tasks)  # validates tasks only import bundled modules
     return library, tasks
 
@@ -92,16 +104,16 @@ def is_internal(node):
 
 def check_internal_import(node, path):
     where = f"{path.relative_to(ROOT)}:{node.lineno}"
-    if isinstance(node, ast.Import) or node.level > 0:
+    if isinstance(node, ast.Import):
         sys.exit(
-            f"bundle: {where}: use absolute `from {PKG_NAME}.module import name` imports"
+            f"bundle: {where}: use `from module import name`, not `import {PKG_NAME}...`"
         )
     for alias in node.names:
         if alias.asname:
             sys.exit(
                 f"bundle: {where}: don't rename internal imports (`as {alias.asname}`)"
             )
-        mod_path = SRC_PKG.joinpath(*node.module.split(".")[1:], alias.name)
+        mod_path = import_target(node, path) / alias.name
         if mod_path.with_suffix(".py").exists() or mod_path.is_dir():
             sys.exit(
                 f"bundle: {where}: import names from modules, not modules (`{alias.name}`)"
