@@ -38,4 +38,14 @@ def run_task2(data_dir=None, out_dir="dist"):
     # chosen item per row; ties -> item1
     preds = np.where(s1 >= s2, test["item1"], test["item2"])
 
+    margin = np.abs(s1 - s2)
+    print(
+        f"picked item1:   {(preds == test['item1'].to_numpy()).mean():.3f}   (≈0.5 expected)"
+    )
+    print(f"ties:           {(s1 == s2).mean():.3%}   (≈0 expected)")
+    print(
+        f"score margin:   median {np.median(margin):.3f}, "
+        f"{(margin < 0.1).mean():.1%} of pairs within 0.1"
+    )
+
     return write_predictions("task_2_test.csv", preds, out_dir, data_dir)

@@ -7,6 +7,8 @@ validation MSE 0.7698 vs 0.7863 for the baseline SVD config (+2.1%). Latent fact
 1-50 factors) did not improve on the biases.
 """
 
+import numpy as np
+
 from assignment_1.modules.models import fit_bias, predict_bias
 from assignment_1.modules.util import load_csv, write_predictions
 
@@ -18,5 +20,10 @@ def run_task1(data_dir=None, out_dir="dist"):
     test = load_csv("task_1_test.csv", data_dir)
     model = fit_bias(train, **TASK1_BIAS_PARAMS)
     preds = predict_bias(model, test["user"], test["item"])
+
+    preds = np.asarray(preds)
+    print(f"pred mean {preds.mean():.3f} (train mean {train.rating.mean():.3f})")
+    print(f"pred range [{preds.min():.2f}, {preds.max():.2f}] (allowed 0–5)")
+    print(f"pred std {preds.std():.3f} (train std {train.rating.std():.3f})")
 
     return write_predictions("task_1_test.csv", preds, out_dir, data_dir)
