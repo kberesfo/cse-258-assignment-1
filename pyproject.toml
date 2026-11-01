@@ -20,13 +20,15 @@ dependencies = [
     "nltk",            # PorterStemmer (ch. 8)
     "ipykernel",
     "demjson3>=3.0.6",
+    "tqdm>=4.70.1",
 ]
 
 [dependency-groups]
-dev = ["nbconvert>=7.17.1", "ruff>=0.17.3"]
+dev = ["ipywidgets>=8.1.9", "nbconvert>=7.17.1", "ruff>=0.17.3"]
 
 [project.scripts]
-assignment-1 = "assignment_1:main"
+assignment-1 = "assignment_1.cli:main"
+a1-bundle = "assignment_1.bundle:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]

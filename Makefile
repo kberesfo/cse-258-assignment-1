@@ -16,7 +16,7 @@ predict:
 	$(RUN) assignment-1 --data-dir $(DATA_DIR) --out-dir $(DIST)
 
 bundle:
-	$(RUN) python scripts/bundle.py $(DIST)/assignment1.py
+   	$(RUN) a1-bundle $(DIST)/assignment1.py
 
 check: predict bundle
 	rm -rf $(CHECKDIR) && mkdir -p $(CHECKDIR)
