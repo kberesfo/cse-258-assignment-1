@@ -1,13 +1,33 @@
-from .ranking import BPRFit, bpr_scorer, fit_bpr
-from .rating import fit_bias, fit_svd, predict_bias, predict_svd, to_surprise_trainset
+"""Model families. Rating models (Tasks 1, 3) in rating/, ranking models and rules (Tasks 2, 4, 5) in ranking/."""
+
+from .ranking.bpr import BPRFit, bpr_scorer, fit_bpr
+from .ranking.markov import TransitionFit, fit_transitions, transition_scorer
+from .ranking.rules import (
+    apply_rules,
+    not_yet_seen_rule,
+    transition_rule,
+    unseen_item_rule,
+)
+from .rating.bias import fit_bias, predict_bias
+from .rating.lfm import fit_svd, predict_svd, to_surprise_trainset
 
 __all__ = [
-    "BPRFit",
-    "bpr_scorer",
+    # rating
     "fit_bias",
-    "fit_bpr",
-    "fit_svd",
     "predict_bias",
+    "fit_svd",
     "predict_svd",
     "to_surprise_trainset",
+    # ranking
+    "BPRFit",
+    "bpr_scorer",
+    "fit_bpr",
+    "TransitionFit",
+    "fit_transitions",
+    "transition_scorer",
+    # rules
+    "apply_rules",
+    "not_yet_seen_rule",
+    "transition_rule",
+    "unseen_item_rule",
 ]

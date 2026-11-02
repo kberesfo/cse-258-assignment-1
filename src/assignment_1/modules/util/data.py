@@ -11,6 +11,16 @@ ID_DTYPES = {"user": str, "item": str, "item1": str, "item2": str}
 
 PathLike = str | Path
 
+# before Goodreads launched (2007)
+TS_MIN = pd.Timestamp("2005-01-01").timestamp()
+# after the latest real timestamps (Dec 2017)
+TS_MAX = pd.Timestamp("2018-12-31").timestamp()
+
+
+def clip_timestamps(ts: pd.Series, lo: float = TS_MIN, hi: float = TS_MAX) -> pd.Series:
+    """Clip corrupt timestamps (~0.14% of rows, e.g. year 25 / 3645) into the plausible range."""
+    return ts.clip(lo, hi)
+
 
 def data_path(name: str, data_dir: PathLike | None = None) -> Path:
     """Resolve a data file: explicit data_dir > $A1_DATA_DIR > ./data"""

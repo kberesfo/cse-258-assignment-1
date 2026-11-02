@@ -23,8 +23,4 @@ def run_task3(data_dir=None, out_dir="dist"):
     model = fit_bias(train, **TASK3_BIAS_PARAMS)
     preds = predict_bias(model, test["user"], test["item"])
 
-    print(f"pred mean {preds.mean():.3f} (train mean {train.rating.mean():.3f})")
-    print(f"pred range [{preds.min():.2f}, {preds.max():.2f}] (allowed 0–5)")
-    print(f"pred std {preds.std():.3f} (train std {train.rating.std():.3f})")
-
     return write_predictions(TASK3_TEST_FILE, preds, out_dir, data_dir)

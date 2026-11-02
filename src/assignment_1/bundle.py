@@ -16,7 +16,8 @@ import ast
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# src/assignment_1/bundle.py -> repo root
+ROOT = Path(__file__).resolve().parents[2]
 SRC_PKG = (
     ROOT / "src" / "assignment_1"
 )  # package root (cli.py, __main__.py: not bundled)
@@ -57,7 +58,8 @@ def dependency_order(paths):
         if p in ordered:
             return
         if p in visiting:
-            sys.exit(f"bundle: circular import involving {p.relative_to(ROOT)}")
+            sys.exit(
+                f"bundle: circular import involving {p.relative_to(ROOT)}")
         visiting.add(p)
         for d in internal_deps(p):
             if d not in paths:
@@ -90,9 +92,11 @@ def module_order():
         key=lambda p: int(p.stem[4:]),
     )
     if not tasks:
-        sys.exit(f"bundle: no tasks/taskN.py found in {tasks_dir.relative_to(ROOT)}")
+        sys.exit(
+            f"bundle: no tasks/taskN.py found in {tasks_dir.relative_to(ROOT)}")
     library = dependency_order(shared)
-    dependency_order(library + tasks)  # validates tasks only import bundled modules
+    # validates tasks only import bundled modules
+    dependency_order(library + tasks)
     return library, tasks
 
 
@@ -133,7 +137,8 @@ def defined_names(node):
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         return [node.name]
     if isinstance(node, (ast.Assign, ast.AnnAssign)):
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        targets = node.targets if isinstance(
+            node, ast.Assign) else [node.target]
         return [n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)]
     return []
 
@@ -172,7 +177,8 @@ def header(title):
 
 def main():
     out = (
-        Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "dist" / "assignment1.py"
+        Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT /
+        "dist" / "assignment1.py"
     ).resolve()
     shared, tasks = module_order()
     imports, owners, sections = [], {}, []

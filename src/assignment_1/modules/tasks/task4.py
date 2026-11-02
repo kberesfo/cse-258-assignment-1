@@ -16,11 +16,13 @@ Baseline config (5 factors) 0.8161 -> tuned BPR (50 factors, reg 0.01) 0.8613
 -> BPR + time rule 0.8812 (+8.0%).
 """
 
-import numpy as np
-import pandas as pd
-
-from assignment_1.modules.models import bpr_scorer, fit_bpr
-from assignment_1.modules.util import load_csv, write_predictions
+from assignment_1.modules.models import (
+    apply_rules,
+    bpr_scorer,
+    fit_bpr,
+    not_yet_seen_rule,
+)
+from assignment_1.modules.util import load_csv, predict_pairs, write_predictions
 
 TASK4_BPR_PARAMS = {
     "factors": 50,
@@ -35,26 +37,10 @@ TASK4_TEST_FILE = "task_4_test.csv"
 def run_task4(data_dir=None, out_dir="dist"):
     train = load_csv(TASK4_TRAIN_FILE, data_dir)
     test = load_csv(TASK4_TEST_FILE, data_dir)
-    fit = fit_bpr(train, **TASK4_BPR_PARAMS)
-    score = bpr_scorer(fit)
-    users = test["user"].to_numpy()
-    s1 = score(users, test["item1"].to_numpy())
-    s2 = score(users, test["item2"].to_numpy())
-    preds = np.where(s1 >= s2, test["item1"], test["item2"])
-    # time rule: where exactly one item had no interactions before t, pick the one that did
-    lo, hi = (
-        pd.Timestamp("2005-01-01").timestamp(),
-        pd.Timestamp("2018-12-31").timestamp(),
-    )
-    ts = train["timestamp"].clip(lo, hi)
-    first_seen = ts.groupby(train["item"]).min()
-    t = test["timestamp"].clip(lo, hi)
-    early1 = test["item1"].map(first_seen) > t
-    early2 = test["item2"].map(first_seen) > t
-    one = (early1 ^ early2).to_numpy()
 
-    seen_item = np.where(early1, test["item2"], test["item1"])
-
-    preds = np.where(one, seen_item, preds)  # rule overrides BPR on those rows
+    preds = predict_pairs(test, bpr_scorer(
+        fit_bpr(train, **TASK4_BPR_PARAMS)))   # BPR's choice per row
+    preds = apply_rules(preds, not_yet_seen_rule(
+        train, test))                    # time rule overrides
 
     return write_predictions(TASK4_TEST_FILE, preds, out_dir, data_dir)
