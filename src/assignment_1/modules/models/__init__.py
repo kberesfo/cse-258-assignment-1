@@ -10,6 +10,7 @@ from .ranking.rules import (
 )
 from .rating.bias import fit_bias, predict_bias
 from .rating.lfm import fit_svd, predict_svd, to_surprise_trainset
+from .time.gaps import GapFit, fit_gap_model, predict_gaps
 
 __all__ = [
     # rating
@@ -30,4 +31,6 @@ __all__ = [
     "not_yet_seen_rule",
     "transition_rule",
     "unseen_item_rule",
+    # time
+    "GapFit", "fit_gap_model", "predict_gaps"
 ]
