@@ -42,13 +42,15 @@ def calc_bere(y_true: ArrayLike, y_pred: ArrayLike) -> float:
 def calc_pair_accuracy(
     pairs: pd.DataFrame,
     score_fn: Callable[[ArrayLike, ArrayLike], NDArray[np.float64]],
+    cols: tuple[str, str, str, str] = ("user", "item1", "item2", "which"),
 ) -> float:
-    """Pairwise accuracy. pairs columns, in order: user, item1, item2, which (true item)."""
-    first_score = score_fn(pairs.iloc[:, 0].to_numpy(), pairs.iloc[:, 1].to_numpy())
-    second_score = score_fn(pairs.iloc[:, 0].to_numpy(), pairs.iloc[:, 2].to_numpy())
+    """Pairwise accuracy. cols names the (user, item1, item2, true item) columns."""
+    user, item1, item2, which = cols
+    users = pairs[user].to_numpy()
+    first_score = score_fn(users, pairs[item1].to_numpy())
+    second_score = score_fn(users, pairs[item2].to_numpy())
 
     pred = np.where(
-        first_score >= second_score, pairs.iloc[:, 1], pairs.iloc[:, 2]
+        first_score >= second_score, pairs[item1], pairs[item2]
     )  # ties -> item1
-
-    return float((pred == pairs.iloc[:, 3]).mean())
+    return float((pred == pairs[which].to_numpy()).mean())

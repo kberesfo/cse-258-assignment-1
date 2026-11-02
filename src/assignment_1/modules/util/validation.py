@@ -16,6 +16,7 @@ def make_pair_validation(
     holdout: Holdout = Holdout.RANDOM,
     val_frac: float = 0.1,
     seed: int = 0,
+    include_timestamp: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build a validation set shaped like a pairwise test file.
@@ -31,7 +32,7 @@ def make_pair_validation(
     holdout = Holdout(
         holdout
     )  # also accepts "random"/"last"; raises ValueError otherwise
-    
+
     match holdout:
         case Holdout.RANDOM:
             tr, val = random_split(train, val_frac=val_frac, seed=seed)
@@ -75,6 +76,9 @@ def make_pair_validation(
     pairs["which"] = real
     pairs["item1"] = np.where(real_first, real, decoys)
     pairs["item2"] = np.where(real_first, decoys, real)
+
+    if include_timestamp:
+        pairs["timestamp"] = val["timestamp"].to_numpy()
 
     assert (pairs.item1 == pairs.item2).sum() == 0  # should be 0
     frac = (pairs.which == pairs.item1).mean()
