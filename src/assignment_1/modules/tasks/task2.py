@@ -1,18 +1,44 @@
 """
-Task 2: read prediction — which of (item1, item2) did the user interact with? Metric: accuracy.
+Task 2: read prediction. Which of (item1, item2) did the user interact with?
+Metric: accuracy (higher is better). No timestamps are used.
 
-Test design: decoys popularity-matched, so popularity alone scores ~50%; no timestamps.
+Test design
+-----------
+Decoys are popularity-matched, so popularity alone scores ~50%. Every test candidate appears
+in training. The decoy sampler does not exclude the user's own history (see Rules).
 
-Model: pairwise logistic regression, P(item1) = σ(θ·[φ(u, item1) − φ(u, item2)]). Candidate
-features φ: BPR score (implicit; item bias + latent factors), log popularity, and item-item
-cosine similarity to the user's training history (sum, max, mean over history items;
-cos(i, j) = |U_i ∩ U_j| / sqrt(|U_i||U_j|)). θ is fit on validation pairs built like the test,
-with base models fit on the reduced train; test features use base models refit on all of
-tasks_1_2_train.csv.
+Model
+-----
+Pairwise logistic regression (the course's pairwise model):
+    P(item1) = σ(θ · [φ(u, item1) − φ(u, item2)])
+Candidate features φ, computed from training history only:
+  - BPR score (implicit; item bias + latent factors)
+  - log popularity
+  - item-item cosine similarity to the user's history: sum, max and mean over history items,
+    with cos(i, j) = |U_i ∩ U_j| / sqrt(|U_i| |U_j|)
+θ is fit on validation pairs built like the test, with base models fit on the reduced train.
+Test features come from base models refit on all of tasks_1_2_train.csv.
 
-Validation (notebooks/task2.ipynb; held-out half of validation pairs): tuned BPR 0.9146,
-BPR + popularity combiner 0.9146 (no gain: decoys are popularity-matched), + cosine 0.9371
-(GB 0.9373 — no gain from trees, so the linear course model is used). Public (BPR only): 0.9066.
+Rules
+-----
+Applied last. Neither case occurs in validation, so the model cannot learn them.
+  1. Unseen item: if exactly one candidate never appears in training, predict it. Kept as a
+     guard; fires on 0% of this test (every candidate appears in training).
+  2. Seen by user: if exactly one candidate is already in the user's training history, predict
+     the other. Positives are held out of the history, and the test's decoy sampler does not
+     exclude it, so a history item is the decoy. 1.92% of test rows.
+
+Validation
+----------
+make_pair_validation(train, seed=0): held-out interactions paired with popularity-sampled
+decoys that exclude the user's history (notebooks/task2.ipynb). Accuracy on the held-out half
+of validation pairs:
+  tuned BPR 0.9146 -> BPR + popularity combiner 0.9146 (no gain: decoys are popularity-matched)
+  -> + cosine 0.9371 (GB 0.9373; trees add nothing, so the linear course model is used)
+Diagnostics (notebooks/task2_diagnostics.ipynb): accuracy is flat across history length and
+popularity gap; >80% of errors are low-confidence pairs where every feature alone is at chance.
+Public: BPR 0.9066 -> LR combiner 0.9302 -> + seen-by-user rule (expected ~0.940).
+Rule evidence: notebooks/rules.ipynb.
 """
 
 import numpy as np
@@ -20,7 +46,15 @@ import pandas as pd
 from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
 
-from assignment_1.modules.models import bpr_scorer, cos_features, fit_bpr, fit_item_cosine
+from assignment_1.modules.models import (
+    apply_rules,
+    bpr_scorer,
+    cos_features,
+    fit_bpr,
+    fit_item_cosine,
+    seen_by_user_rule,
+    unseen_item_rule,
+)
 from assignment_1.modules.util import load_csv, make_pair_validation, write_predictions
 
 TASK2_BPR_PARAMS = {
@@ -64,4 +98,10 @@ def run_task2(data_dir=None, out_dir="dist"):
     X_test = task2_pair_features(train, test)
     preds = np.where(combiner.predict(X_test) == 1,
                      test["item1"], test["item2"])
+
+    preds = apply_rules(
+        preds,
+        unseen_item_rule(train, test),
+        seen_by_user_rule(train, test)
+    )
     return write_predictions(TASK2_TEST_FILE, preds, out_dir, data_dir)

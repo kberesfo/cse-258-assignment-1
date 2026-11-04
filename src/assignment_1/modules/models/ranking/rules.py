@@ -38,6 +38,21 @@ def unseen_item_rule(train_df: pd.DataFrame, pairs: pd.DataFrame) -> tuple[NDArr
     return applies, choice
 
 
+def seen_by_user_rule(train_df: pd.DataFrame, pairs: pd.DataFrame) -> tuple[NDArray[np.bool_], NDArray]:
+    """
+    If exactly one candidate is already in this user's training history, predict the other.
+    Test positives are held-out interactions, so they never appear in the user's own history;
+    a candidate that does is the decoy (the test's decoy sampler did not exclude history).
+    """
+    hist = set(train_df["user"] + "|" + train_df["item"])
+    seen1 = (pairs["user"] + "|" + pairs["item1"]).isin(hist).to_numpy()
+    seen2 = (pairs["user"] + "|" + pairs["item2"]).isin(hist).to_numpy()
+    applies = seen1 ^ seen2
+    choice = np.where(seen1, pairs["item2"], pairs["item1"])
+
+    return applies, choice
+
+
 def transition_rule(
     fit: TransitionFit, pairs: pd.DataFrame, min_gap: int = 5
 ) -> tuple[NDArray[np.bool_], NDArray]:

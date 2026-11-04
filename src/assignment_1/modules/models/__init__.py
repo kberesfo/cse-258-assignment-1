@@ -8,6 +8,7 @@ from .ranking.rules import (
     transition_rule,
     trend_rule,
     unseen_item_rule,
+    seen_by_user_rule,
 )
 from .rating.bias import fit_bias, predict_bias
 from .rating.lfm import fit_svd, predict_svd, to_surprise_trainset
@@ -43,6 +44,7 @@ __all__ = [
     "trend_rule",
     "transition_rule",
     "unseen_item_rule",
+    "seen_by_user_rule"
     # time
     "GapFit",
     "fit_gap_model",

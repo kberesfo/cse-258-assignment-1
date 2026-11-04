@@ -1,22 +1,58 @@
 """
-Task 4 ranks two candidates using a gradient-boosted pairwise combiner. 
-Each candidate gets features computed from training history only: BPR score,
-whether the item had not yet appeared at the query time, item age,
-log popularity, and the item’s share of interactions in the query’s
-time bin at three resolutions (20/50/100 quantile bins). The combiner
-(HistGradientBoostingClassifier) is trained on feature differences for 
-validation pairs built like the test (popularity-matched decoys), 
-with base models fit on the reduced train. Test features come from 
-base models refit on the full train. Held-out validation accuracy was 0.9041,
-against 0.8803 for BPR plus the not-yet-seen rule.
+Task 4: time-aware read prediction. At the row's timestamp, which of (item1, item2) did the
+user interact with? Metric: accuracy (higher is better).
+
+Test design
+-----------
+Decoys are popularity-matched, so popularity alone scores ~50%. Decoys ignore time: a decoy can
+be a book that did not yet exist at the row's timestamp, while the real item always did
+(~26% of rows have exactly one not-yet-seen candidate). Every test candidate appears in
+training. The decoy sampler does not exclude the user's own history (see Rules).
+
+Model
+-----
+Gradient-boosted pairwise combiner. Each candidate gets features computed from training history
+only, at the row's timestamp t:
+  - BPR score (implicit; item bias + latent factors)
+  - not-yet-seen: the item's first training interaction is after t
+  - item age at t (log days since first interaction)
+  - log popularity
+  - trend: the item's share of interactions in t's time bin, at 20/50/100 quantile bins
+HistGradientBoostingClassifier is trained on feature differences (item1 - item2) for
+validation pairs, with base models fit on the reduced train. Test features come from base
+models refit on all of tasks_3_4_train.csv. The earlier hard not-yet-seen rule is now a
+feature, so the combiner weighs it against the other signals.
+
+Rules
+-----
+Applied last. Neither case occurs in validation, so the combiner cannot learn them.
+  1. Unseen item: if exactly one candidate never appears in training, predict it. Kept as a
+     guard; fires on 0% of this test (every candidate appears in training).
+  2. Seen by user: if exactly one candidate is already in the user's training history, predict
+     the other. Positives are held out of the history, and the test's decoy sampler does not
+     exclude it, so a history item is the decoy. 5.07% of test rows.
+
+Validation
+----------
+make_pair_validation(train, include_timestamp=True, seed=0): random held-out interactions
+with their timestamps, paired with popularity-sampled decoys that exclude the user's history
+(notebooks/task4.ipynb). Accuracy on the held-out half of validation pairs:
+  BPR + not-yet-seen rule 0.8803 -> LR combiner 0.9018 -> GB combiner 0.9041
+(trend at three resolutions beat a single 50-bin trend: GB 0.9026 -> 0.9041).
+Public: BPR + rule 0.8706 -> GB combiner 0.8984 -> + seen-by-user rule 0.9172
+(predicted +1.97 from rules.ipynb; observed +1.88).
+Rule evidence: notebooks/rules.ipynb.
 """
 
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 from assignment_1.modules.models import (
+    apply_rules,
     fit_pair_context,
     pair_features,
+    seen_by_user_rule,
+    unseen_item_rule,
 )
 from assignment_1.modules.util import (
     load_csv,
@@ -48,5 +84,11 @@ def run_task4(data_dir=None, out_dir="dist"):
     X_test = pair_features(fit_pair_context(train, TASK4_BPR_PARAMS), test)
     preds = np.where(combiner.predict(X_test) == 1,
                      test["item1"], test["item2"])
-    
+
+    # Last: a candidate already in the user's history is the decoy (case absent from validation)
+    preds = apply_rules(
+        preds,
+        unseen_item_rule(train, test),
+        seen_by_user_rule(train, test)
+    )
     return write_predictions(TASK4_TEST_FILE, preds, out_dir, data_dir)
