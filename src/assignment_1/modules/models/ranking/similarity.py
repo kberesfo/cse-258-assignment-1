@@ -20,16 +20,24 @@ def fit_item_cosine(train_df: pd.DataFrame) -> CosineFit:
     """cos(i, j) = |U_i ∩ U_j| / sqrt(|U_i| |U_j|), computed as normalized item vectors' dot products."""
     users = pd.Index(train_df["user"].unique())
     items = pd.Index(train_df["item"].unique())
+
     R = csr_matrix(
-        (np.ones(len(train_df)),
-            (users.get_indexer(train_df["user"]), items.get_indexer(train_df["item"]))),
+        (
+            np.ones(len(train_df)),
+            (
+                users.get_indexer(train_df["user"]),
+                items.get_indexer(train_df["item"])
+            )
+        ),
         shape=(len(users), len(items)),
     )
+
     R.data[:] = 1                         # repeat interactions count once
     Xn = normalize(R.T.tocsr())           # item × user, each row unit length
     S = (Xn @ Xn.T).tocsr()               # item × item cosine
     S.setdiag(0)                          # an item isn't evidence for itself
     S.eliminate_zeros()
+
     return CosineFit(users=users, items=items, R=R, S=S)
 
 
@@ -44,6 +52,7 @@ def cos_features(fit: CosineFit, users: pd.Series, items: pd.Series) -> pd.DataF
     """
     u = fit.users.get_indexer(users)
     i = fit.items.get_indexer(items)
+
     ok = (u >= 0) & (i >= 0)
     out = {k: np.zeros(len(u)) for k in ("cos_sum", "cos_max", "cos_mean")}
 
@@ -52,6 +61,7 @@ def cos_features(fit: CosineFit, users: pd.Series, items: pd.Series) -> pd.DataF
     P = H.multiply(fit.S[i[ok]]).tocsr()
     s = np.asarray(P.sum(axis=1)).ravel()
     n = np.asarray(H.sum(axis=1)).ravel()
+    
     out["cos_sum"][ok] = s
     out["cos_max"][ok] = P.max(axis=1).toarray().ravel()
     out["cos_mean"][ok] = s / np.maximum(n, 1)
