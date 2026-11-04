@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
 
-from assignment_1.modules.util import clip_timestamps
+from assignment_1.modules.util import clip_timestamps, time_bin_edges, time_bins
 
 from .markov import TransitionFit, transition_scorer
 
@@ -64,3 +64,34 @@ def apply_rules(preds: ArrayLike, *rules: tuple[NDArray[np.bool_], NDArray]) -> 
         preds = np.where(applies, choice, preds)
 
     return preds
+
+
+def trend_rule(
+    train_df: pd.DataFrame, pairs: pd.DataFrame, min_gap: float = 0.25, n_bins: int = 50
+) -> tuple[NDArray[np.bool_], NDArray]:
+    """..."""
+    # 1. time periods, from training timestamps
+    edges = time_bin_edges(train_df["timestamp"], n_bins=n_bins)
+    tr_bins = time_bins(train_df["timestamp"], edges)
+
+    # 2. how many interactions each item has in each period, and in total
+    item_bin = pd.Series(1, index=pd.MultiIndex.from_arrays(
+        [train_df["item"], tr_bins])).groupby(level=[0, 1]).size()
+    item_tot = train_df["item"].value_counts()
+
+    # 3. each user's "current" period = the period of their last training interaction
+    t_last = train_df.groupby("user")["timestamp"].max()
+    ubin = time_bins(pairs["user"].map(t_last), edges)
+
+    # 4. trend score per candidate = share of its interactions in the user's current period
+    def trend(items):
+        keys = pd.MultiIndex.from_arrays([items, ubin])
+        in_bin = item_bin.reindex(keys, fill_value=0).to_numpy(dtype=float)
+        return in_bin / (items.map(item_tot).fillna(0).to_numpy(dtype=float) + 1)
+
+    f1, f2 = trend(pairs["item1"]), trend(pairs["item2"])
+
+    # the rule: act only where the gap is big; pick the candidate with the higher trend score
+    applies = np.abs(f1 - f2) >= min_gap
+    choice = np.where(f1 >= f2, pairs["item1"], pairs["item2"])
+    return applies, choice

@@ -92,3 +92,7 @@ def write_predictions(
             f"{line.strip()},{p}\n" for line, p in zip(rows, preds, strict=True)
         )
     return out_path
+
+def drop_zero_ratings(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove rating-0 rows (Goodreads 'shelved, not rated'); Assignment 1 skips them in Tasks 1/3 MSE."""
+    return df[df["rating"] > 0].reset_index(drop=True)

@@ -34,3 +34,9 @@ a1-bundle = "assignment_1.bundle:main"
 requires = ["uv_build>=0.13.6,<0.14.0"]
 
 build-backend = "uv_build"
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["assignment_1"]

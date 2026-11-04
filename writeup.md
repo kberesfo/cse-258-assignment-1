@@ -8,7 +8,7 @@ Task 2 (interaction prediction):
 TODO
 
 Task 3 (rating prediction with timestamps):
-TODO
+Latent factor model (Surprise SVD: global offset + user/item biases + K-dim user/item factors, SGD on observed ratings). Hyperparameters chosen on a fixed 90/10 validation split; final model retrained on all training data. TODO: final settings + validation MSE vs baseline.
 
 Task 4 (interaction prediction with timestamps):
 TODO
@@ -17,4 +17,4 @@ Task 5 (next-item prediction):
 TODO
 
 Task 6 (time delta prediction):
-TODO
+I used Shrunk Per-User Median instead of mean, so 

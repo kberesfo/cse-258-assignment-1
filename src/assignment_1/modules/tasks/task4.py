@@ -1,28 +1,28 @@
 """
-Task 4: interaction prediction with timestamps — which of (item1, item2) did the user
-interact with at time t? Metric: accuracy.
-
-Model: BPR (implicit; item bias + user/item latent factors) trained on ALL of
-tasks_3_4_train.csv, plus a time rule: if exactly one candidate has no training interactions
-before t (first appearance after t), predict the other one. Otherwise use the higher BPR score
-(ties -> item1). Timestamps are clipped to 2005-2018 (~0.14% are corrupt, e.g. year 25 / 3645).
-
-Test design: decoys appear to be sampled ignoring time, so in ~25% of test rows exactly one
-item did not exist yet at t; on validation that rule is right 97% of the time where it applies.
-
-Validation: held-out 10% of interactions with popularity-sampled decoys and timestamps
-(notebooks/task4.ipynb; first-appearance times computed from the training part only).
-Baseline config (5 factors) 0.8161 -> tuned BPR (50 factors, reg 0.01) 0.8613
--> BPR + time rule 0.8812 (+8.0%).
+Task 4 ranks two candidates using a gradient-boosted pairwise combiner. 
+Each candidate gets features computed from training history only: BPR score,
+whether the item had not yet appeared at the query time, item age,
+log popularity, and the item’s share of interactions in the query’s
+time bin at three resolutions (20/50/100 quantile bins). The combiner
+(HistGradientBoostingClassifier) is trained on feature differences for 
+validation pairs built like the test (popularity-matched decoys), 
+with base models fit on the reduced train. Test features come from 
+base models refit on the full train. Held-out validation accuracy was 0.9041,
+against 0.8803 for BPR plus the not-yet-seen rule.
 """
 
+import numpy as np
+from sklearn.ensemble import HistGradientBoostingClassifier
+
 from assignment_1.modules.models import (
-    apply_rules,
-    bpr_scorer,
-    fit_bpr,
-    not_yet_seen_rule,
+    fit_pair_context,
+    pair_features,
 )
-from assignment_1.modules.util import load_csv, predict_pairs, write_predictions
+from assignment_1.modules.util import (
+    load_csv,
+    make_pair_validation,
+    write_predictions,
+)
 
 TASK4_BPR_PARAMS = {
     "factors": 50,
@@ -38,9 +38,15 @@ def run_task4(data_dir=None, out_dir="dist"):
     train = load_csv(TASK4_TRAIN_FILE, data_dir)
     test = load_csv(TASK4_TEST_FILE, data_dir)
 
-    preds = predict_pairs(test, bpr_scorer(
-        fit_bpr(train, **TASK4_BPR_PARAMS)))   # BPR's choice per row
-    preds = apply_rules(preds, not_yet_seen_rule(
-        train, test))                    # time rule overrides
+    # Learn the combiner on validation pairs (base models fit on tr only)
+    tr, pairs = make_pair_validation(train, include_timestamp=True, seed=0)
+    X_val = pair_features(fit_pair_context(tr, TASK4_BPR_PARAMS), pairs)
+    y_val = (pairs["which"] == pairs["item1"]).to_numpy().astype(int)
+    combiner = HistGradientBoostingClassifier(random_state=0).fit(X_val, y_val)
 
+    # Test features from base models refit on all of train
+    X_test = pair_features(fit_pair_context(train, TASK4_BPR_PARAMS), test)
+    preds = np.where(combiner.predict(X_test) == 1,
+                     test["item1"], test["item2"])
+    
     return write_predictions(TASK4_TEST_FILE, preds, out_dir, data_dir)
