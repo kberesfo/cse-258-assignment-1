@@ -14,8 +14,8 @@ Pairwise logistic regression (the course's pairwise model):
 Candidate features φ, computed from training history only:
   - BPR score (implicit; item bias + latent factors)
   - log popularity
-  - item-item cosine similarity to the user's history: sum, max and mean over history items,
-    with cos(i, j) = |U_i ∩ U_j| / sqrt(|U_i| |U_j|)
+  - item-item similarity to the user's history: sum, max and mean over history items, for each
+    similarity in TASK2_SIMILARITIES (binary cosine: |U_i ∩ U_j| / sqrt(|U_i| |U_j|))
 θ is fit on validation pairs built like the test, with base models fit on the reduced train.
 Test features come from base models refit on all of tasks_1_2_train.csv.
 
@@ -37,21 +37,20 @@ of validation pairs:
   -> + cosine 0.9371 (GB 0.9373; trees add nothing, so the linear course model is used)
 Diagnostics (notebooks/task2_diagnostics.ipynb): accuracy is flat across history length and
 popularity gap; >80% of errors are low-confidence pairs where every feature alone is at chance.
-Public: BPR 0.9066 -> LR combiner 0.9302 -> + seen-by-user rule (expected ~0.940).
+Public: BPR 0.9066 -> LR combiner 0.9302 -> + seen-by-user rule 0.9407.
 Rule evidence: notebooks/rules.ipynb.
 """
 
 import numpy as np
 import pandas as pd
-from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
 
 from assignment_1.modules.models import (
+    BPRModel,
+    ItemSimilarity,
+    Similarity,
     apply_rules,
-    bpr_scorer,
-    cos_features,
-    fit_bpr,
-    fit_item_cosine,
+    binary_cosine,
     seen_by_user_rule,
     unseen_item_rule,
 )
@@ -63,25 +62,33 @@ TASK2_BPR_PARAMS = {
     "learning_rate": 0.01,
     "iterations": 100,
 }
-TASK2_FEATURES = ["bpr", "log_pop", "cos_sum", "cos_max", "cos_mean"]
+# (similarity function, column prefix): each adds {prefix}_sum / _max / _mean
+SimSpec = tuple[Similarity, str] | tuple[Similarity, str, tuple[int, ...]]
+TASK2_SIMILARITIES: list[SimSpec] = [(binary_cosine, "cos")]
 TASK2_TRAIN_FILE = "tasks_1_2_train.csv"
 TASK2_TEST_FILE = "task_2_test.csv"
 
 
-def task2_pair_features(train_df: pd.DataFrame, pairs: pd.DataFrame) -> NDArray:
-    """Fit base models on train_df; return φ(u, item1) − φ(u, item2) for each pair."""
-    bpr = bpr_scorer(fit_bpr(train_df, **TASK2_BPR_PARAMS))
+def task2_pair_features(
+    train_df: pd.DataFrame,
+    pairs: pd.DataFrame,
+    similarities: list[SimSpec] = TASK2_SIMILARITIES
+) -> pd.DataFrame:
+    """Fit base models on train_df; return φ(u, item1) − φ(u, item2) per pair, one named column
+    per feature: bpr, log_pop, then {prefix}_sum / _max / _mean for each similarity."""
+    bpr = BPRModel(**TASK2_BPR_PARAMS).fit(train_df)
     item_tot = train_df["item"].value_counts()
-    cos_fit = fit_item_cosine(train_df)
+    sims = [ItemSimilarity(f, prefix=p, top_k=k[0] if k else ()).fit(train_df)
+            for f, p, *k in similarities]
 
     def cand(items: pd.Series) -> pd.DataFrame:
-        F = cos_features(cos_fit, pairs["user"], items)
-        F["bpr"] = bpr(pairs["user"].to_numpy(), items.to_numpy())
-        F["log_pop"] = np.log1p(
-            items.map(item_tot).fillna(0).to_numpy(dtype=float))
-        return F[TASK2_FEATURES]
+        base = pd.DataFrame({
+            "bpr": bpr(pairs["user"].to_numpy(), items.to_numpy()),
+            "log_pop": np.log1p(items.map(item_tot).fillna(0).to_numpy(dtype=float)),
+        })
+        return pd.concat([base] + [s.features(pairs["user"], items) for s in sims], axis=1)
 
-    return (cand(pairs["item1"]) - cand(pairs["item2"])).to_numpy()
+    return cand(pairs["item1"]) - cand(pairs["item2"])
 
 
 def run_task2(data_dir=None, out_dir="dist"):
@@ -90,18 +97,16 @@ def run_task2(data_dir=None, out_dir="dist"):
 
     # Learn θ on validation pairs (base models fit on tr only)
     tr, pairs = make_pair_validation(train, seed=0)
-    X_val = task2_pair_features(tr, pairs)
+    X_val = task2_pair_features(tr, pairs).to_numpy()
     y_val = (pairs["which"] == pairs["item1"]).to_numpy().astype(int)
     combiner = LogisticRegression(max_iter=1000).fit(X_val, y_val)
 
     # Test features from base models refit on all of train
-    X_test = task2_pair_features(train, test)
+    X_test = task2_pair_features(train, test).to_numpy()
     preds = np.where(combiner.predict(X_test) == 1,
                      test["item1"], test["item2"])
 
-    preds = apply_rules(
-        preds,
-        unseen_item_rule(train, test),
-        seen_by_user_rule(train, test)
-    )
+    # Last: test-design rules (see Rules in the docstring)
+    preds = apply_rules(preds, unseen_item_rule(
+        train, test), seen_by_user_rule(train, test))
     return write_predictions(TASK2_TEST_FILE, preds, out_dir, data_dir)

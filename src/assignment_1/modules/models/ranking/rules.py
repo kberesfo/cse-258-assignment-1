@@ -4,7 +4,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from assignment_1.modules.util import clip_timestamps, time_bin_edges, time_bins
 
-from .markov import TransitionFit, transition_scorer
+from .markov import TransitionModel
 
 
 def not_yet_seen_rule(
@@ -51,8 +51,10 @@ def seen_by_user_rule(train_df: pd.DataFrame, pairs: pd.DataFrame) -> tuple[NDAr
     a candidate that does is the decoy (the test's decoy sampler did not exclude history).
     """
     hist = pd.MultiIndex.from_frame(train_df[["user", "item"]])
-    seen1 = pd.MultiIndex.from_arrays([pairs["user"], pairs["item1"]]).isin(hist)
-    seen2 = pd.MultiIndex.from_arrays([pairs["user"], pairs["item2"]]).isin(hist)
+    seen1 = pd.MultiIndex.from_arrays(
+        [pairs["user"], pairs["item1"]]).isin(hist)
+    seen2 = pd.MultiIndex.from_arrays(
+        [pairs["user"], pairs["item2"]]).isin(hist)
     # seen1 XOR seen2
     applies = seen1 ^ seen2
     choice = np.where(seen1, pairs["item2"], pairs["item1"])
@@ -61,17 +63,16 @@ def seen_by_user_rule(train_df: pd.DataFrame, pairs: pd.DataFrame) -> tuple[NDAr
 
 
 def transition_rule(
-    fit: TransitionFit, pairs: pd.DataFrame, min_gap: int = 5
+    fit: TransitionModel, pairs: pd.DataFrame, min_gap: int = 5
 ) -> tuple[NDArray[np.bool_], NDArray]:
     """Where one candidate follows the user's last item at least `min_gap` more times than the
     other, choose it. fit = fit_transitions(training data) — tr for validation, full train for test.
 
     Returns (applies, choice): rows the rule covers, and the item it picks there.
     """
-    tscore = transition_scorer(fit)
     users = pairs["user"].to_numpy()
-    t1 = tscore(users, pairs["item1"].to_numpy())
-    t2 = tscore(users, pairs["item2"].to_numpy())
+    t1 = fit(users, pairs["item1"].to_numpy())
+    t2 = fit(users, pairs["item2"].to_numpy())
     applies = np.abs(t1 - t2) >= min_gap
     choice = np.where(t1 >= t2, pairs["item1"], pairs["item2"])
 

@@ -9,14 +9,14 @@ real interactions), so popularity alone scores ~50%.
 
 Model
 -----
-Gradient-boosted pairwise combiner (same structure as Task 4). Each candidate gets features
-computed from training history only. The query time is the user's last training interaction
-(t_last), since the next item follows it.
+Gradient-boosted pairwise combiner (same structure as Task 4), on PairFeatures with
+transitions on. Each candidate gets features computed from training history only. The query
+time is the user's last training interaction (t_last), since the next item follows it.
   - BPR score (implicit; item bias + latent factors)
   - log popularity
   - item age and not-yet-seen, relative to t_last
   - trend: the item's share of interactions in t_last's time bin, at 20/50/100 quantile bins
-  - log first-order transition count from the user's last item
+  - log first-order transition count from the user's last item, and an unseen-in-train flag
 HistGradientBoostingClassifier is trained on feature differences (item1 - item2) for
 validation pairs, with base models fit on the reduced train. Test features come from base
 models refit on all of task_5_train.csv.
@@ -40,7 +40,7 @@ decoy; rows whose held-out item is unseen in the reduced train are dropped
 (notebooks/task5.ipynb). Accuracy on the held-out half of validation pairs:
   baseline BPR (5 factors) 0.8425 -> tuned BPR 0.8704 -> + trend/transition rules 0.8728
   -> GB combiner 0.8932
-Public: rules 0.8703 -> combiner 0.8905 -> + seen-by-user rule (expected ~0.895).
+Public: rules 0.8703 -> combiner 0.8905 -> + seen-by-user rule 0.8945.
 Rule evidence: notebooks/rules.ipynb.
 """
 
@@ -48,9 +48,9 @@ import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 from assignment_1.modules.models import (
+    PairFeatures,
     apply_rules,
-    fit_pair_context,
-    pair_features,
+    binary_cosine,
     seen_by_user_rule,
     unseen_item_rule,
 )
@@ -71,27 +71,27 @@ TASK5_TRAIN_FILE = "task_5_train.csv"
 TASK5_TEST_FILE = "task_5_test.csv"
 
 
+def task5_features() -> PairFeatures:
+    """Unfitted feature builder; fit on tr for validation, on all of train for the test."""
+    return PairFeatures(TASK5_BPR_PARAMS, transitions=True, similarity=binary_cosine, sim_prefix="cos")
+
+
 def run_task5(data_dir=None, out_dir="dist"):
     train = load_csv(TASK5_TRAIN_FILE, data_dir)
     test = load_csv(TASK5_TEST_FILE, data_dir)
 
     # Learn the combiner on validation pairs (base models fit on tr only; no timestamp -> t_last)
     tr, pairs = make_pair_validation(train, holdout=Holdout.LAST, seed=0)
-    X_val = pair_features(fit_pair_context(
-        tr, TASK5_BPR_PARAMS, transitions=True), pairs)
+    X_val = task5_features().fit(tr).transform(pairs)
     y_val = (pairs["which"] == pairs["item1"]).to_numpy().astype(int)
     combiner = HistGradientBoostingClassifier(random_state=0).fit(X_val, y_val)
 
     # Test features from base models refit on all of train
-    X_test = pair_features(fit_pair_context(
-        train, TASK5_BPR_PARAMS, transitions=True), test)
+    X_test = task5_features().fit(train).transform(test)
     preds = np.where(combiner.predict(X_test) == 1,
                      test["item1"], test["item2"])
 
-    # Last: an unseen candidate is the real item (case absent from validation)
-    preds = apply_rules(
-        preds,
-        unseen_item_rule(train, test),
-        seen_by_user_rule(train, test)
-    )
+    # Last: test-design rules (see Rules in the docstring)
+    preds = apply_rules(preds, unseen_item_rule(
+        train, test), seen_by_user_rule(train, test))
     return write_predictions(TASK5_TEST_FILE, preds, out_dir, data_dir)

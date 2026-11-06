@@ -1,43 +1,48 @@
 """Model families. Rating models (Tasks 1, 3) in rating/, ranking models and rules (Tasks 2, 4, 5) in ranking/."""
 
-from .ranking.bpr import BPRFit, bpr_scorer, fit_bpr
-from .ranking.markov import TransitionFit, fit_transitions, transition_scorer
+from .ranking.bpr import BPRModel
+from .ranking.markov import TransitionModel
+from .ranking.pairwise import PairFeatures
 from .ranking.rules import (
     apply_rules,
     not_yet_seen_rule,
+    seen_by_user_rule,
     transition_rule,
     trend_rule,
     unseen_item_rule,
-    seen_by_user_rule,
 )
-from .rating.bias import fit_bias, predict_bias
-from .rating.lfm import fit_svd, predict_svd, to_surprise_trainset
-from .rating.time_bias import TimeBiasFit, fit_time_bias, predict_time_bias
-from .time.gaps import GapFit, fit_gap_model, item_first_seen_bound, predict_gaps
-from .ranking.pairwise import cand_features, pair_features, PairContext, fit_pair_context
-from .ranking.similarity import CosineFit, fit_item_cosine, cos_features
+from .rating.base import RatingModel
+from .rating.bias import BiasModel
+from .rating.knn import ItemKNN
+from .rating.lfm import SVDModel
+from .rating.session import SessionResidual
+from .rating.stacking import FeatureSource, RatingStats, StackedRating
+from .rating.time_bias import TimeBiasModel
+from .similarity import (
+    ItemSimilarity,
+    Similarity,
+    adjusted_cosine,
+    binary_cosine,
+    jaccard,
+)
+from .time.gaps import GapModel
 
 __all__ = [
     # rating
-    "fit_bias",
-    "predict_bias",
+    "BiasModel",
+    "SVDModel",
     "fit_svd",
-    "predict_svd",
-    "to_surprise_trainset",
+    "TimeBiasModel",
+    "ItemKNN",
+    "FeatureSource",
+    "RatingStats",
+    "StackedRating",
+    "RatingModel",
+    "SessionResidual",
     # ranking
-    "BPRFit",
-    "TimeBiasFit",
-    "bpr_scorer",
-    "fit_bpr",
-    "TransitionFit",
-    "fit_transitions",
-    "transition_scorer",
-    "fit_time_bias",
-    "predict_time_bias",
-    "cand_features",
-    "pair_features",
-    "PairContext",
-    "fit_pair_context"
+    "BPRModel",
+    "TransitionModel",
+    "PairFeatures",
     # rules
     "apply_rules",
     "not_yet_seen_rule",
@@ -46,12 +51,11 @@ __all__ = [
     "unseen_item_rule",
     "seen_by_user_rule"
     # time
-    "GapFit",
-    "fit_gap_model",
-    "predict_gaps",
-    "item_first_seen_bound",
+    "GapModel",
     # similarity
-    "CosineFit",
-    "fit_item_cosine",
-    "cos_features"
+    "ItemSimilarity",
+    "Similarity",
+    "adjusted_cosine",
+    "jaccard",
+    "binary_cosine"
 ]

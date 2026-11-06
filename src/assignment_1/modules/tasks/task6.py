@@ -21,13 +21,7 @@ Validation: each user's last gap held out, predicted from their earlier gaps
 Public leaderboard before the bound: 13,013,427.
 """
 
-import numpy as np
-
-from assignment_1.modules.models import (
-    fit_gap_model,
-    item_first_seen_bound,
-    predict_gaps,
-)
+from assignment_1.modules.models import GapModel
 from assignment_1.modules.util import load_csv, write_predictions
 
 TASK6_GAP_PARAMS = {"k": 10, "lam": 2.0}
@@ -41,9 +35,9 @@ def run_task6(data_dir=None, out_dir="dist"):
     train = load_csv(TASK6_TRAIN_FILE, data_dir)
     test = load_csv(TASK6_TEST_FILE, data_dir)
 
-    preds = predict_gaps(fit_gap_model(
-        train, **TASK6_GAP_PARAMS), test["user"])
-    bound = item_first_seen_bound(train, test["user"], test["item"])
-    preds = np.fmax(preds, bound + TASK6_BOUND_OFFSET)
+    model = GapModel(
+        **TASK6_GAP_PARAMS,
+        bound_offset=TASK6_BOUND_OFFSET
+    ).fit(train)
 
-    return write_predictions(TASK6_TEST_FILE, preds, out_dir, data_dir)
+    return write_predictions(TASK6_TEST_FILE, model.predict(test), out_dir, data_dir)

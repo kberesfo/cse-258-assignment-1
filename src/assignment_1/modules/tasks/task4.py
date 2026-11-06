@@ -11,8 +11,8 @@ training. The decoy sampler does not exclude the user's own history (see Rules).
 
 Model
 -----
-Gradient-boosted pairwise combiner. Each candidate gets features computed from training history
-only, at the row's timestamp t:
+Gradient-boosted pairwise combiner on PairFeatures. Each candidate gets features computed from
+training history only, at the row's timestamp t:
   - BPR score (implicit; item bias + latent factors)
   - not-yet-seen: the item's first training interaction is after t
   - item age at t (log days since first interaction)
@@ -22,6 +22,12 @@ HistGradientBoostingClassifier is trained on feature differences (item1 - item2)
 validation pairs, with base models fit on the reduced train. Test features come from base
 models refit on all of tasks_3_4_train.csv. The earlier hard not-yet-seen rule is now a
 feature, so the combiner weighs it against the other signals.
+
+Why gradient boosting: the pairwise logistic regression fits one weight per feature,
+so each signal contributes linearly and independently. Boosted trees fit the same log-loss
+objective but replace θ·Δφ with a sum of small trees, which can learn interactions such as
+"the BPR gap matters less when one candidate is not-yet-seen". On the held-out half this gave
+0.9041 vs 0.9018 for LR.
 
 Rules
 -----
@@ -48,17 +54,13 @@ import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 from assignment_1.modules.models import (
+    PairFeatures,
     apply_rules,
-    fit_pair_context,
-    pair_features,
+    binary_cosine,
     seen_by_user_rule,
     unseen_item_rule,
 )
-from assignment_1.modules.util import (
-    load_csv,
-    make_pair_validation,
-    write_predictions,
-)
+from assignment_1.modules.util import load_csv, make_pair_validation, write_predictions
 
 TASK4_BPR_PARAMS = {
     "factors": 50,
@@ -70,25 +72,27 @@ TASK4_TRAIN_FILE = "tasks_3_4_train.csv"
 TASK4_TEST_FILE = "task_4_test.csv"
 
 
+def task4_features() -> PairFeatures:
+    """Unfitted feature builder; fit on tr for validation, on all of train for the test."""
+    return PairFeatures(TASK4_BPR_PARAMS, similarity=binary_cosine, sim_prefix="cos")
+
+
 def run_task4(data_dir=None, out_dir="dist"):
     train = load_csv(TASK4_TRAIN_FILE, data_dir)
     test = load_csv(TASK4_TEST_FILE, data_dir)
 
     # Learn the combiner on validation pairs (base models fit on tr only)
     tr, pairs = make_pair_validation(train, include_timestamp=True, seed=0)
-    X_val = pair_features(fit_pair_context(tr, TASK4_BPR_PARAMS), pairs)
+    X_val = task4_features().fit(tr).transform(pairs)
     y_val = (pairs["which"] == pairs["item1"]).to_numpy().astype(int)
     combiner = HistGradientBoostingClassifier(random_state=0).fit(X_val, y_val)
 
     # Test features from base models refit on all of train
-    X_test = pair_features(fit_pair_context(train, TASK4_BPR_PARAMS), test)
+    X_test = task4_features().fit(train).transform(test)
     preds = np.where(combiner.predict(X_test) == 1,
                      test["item1"], test["item2"])
 
-    # Last: a candidate already in the user's history is the decoy (case absent from validation)
-    preds = apply_rules(
-        preds,
-        unseen_item_rule(train, test),
-        seen_by_user_rule(train, test)
-    )
+    # Last: test-design rules (see Rules in the docstring)
+    preds = apply_rules(preds, unseen_item_rule(
+        train, test), seen_by_user_rule(train, test))
     return write_predictions(TASK4_TEST_FILE, preds, out_dir, data_dir)

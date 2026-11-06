@@ -11,7 +11,15 @@ Validation (notebooks/task3.ipynb; random 75/25 split, scored on nonzero rows; t
 span the same period as train)
 """
 
-from assignment_1.modules.models import fit_bias, predict_bias
+from sklearn.ensemble import HistGradientBoostingRegressor
+
+from assignment_1.modules.models import (
+    ItemKNN,
+    RatingStats,
+    SessionResidual,
+    StackedRating,
+    TimeBiasModel,
+)
 from assignment_1.modules.util import drop_zero_ratings, load_csv, write_predictions
 
 TASK3_BIAS_PARAMS = {"reg_u": 3.0, "reg_i": 5.0, "n_epochs": 25}
@@ -20,14 +28,17 @@ TASK3_TEST_FILE = "task_3_test.csv"
 TASK3_DROP_ZEROS = True
 
 
+TASK3_TIME_PARAMS = {"reg_u": 3.0, "reg_i": 5.0, "reg_ib": 50.0, "n_bins": 10}
+
+
 def run_task3(data_dir=None, out_dir="dist"):
-    train = load_csv(TASK3_TRAIN_FILE, data_dir)
+    train = drop_zero_ratings(load_csv(TASK3_TRAIN_FILE, data_dir))
     test = load_csv(TASK3_TEST_FILE, data_dir)
 
-    if TASK3_DROP_ZEROS:
-        train = drop_zero_ratings(train)
-
-    model = fit_bias(train, **TASK3_BIAS_PARAMS)
-    preds = predict_bias(model, test["user"], test["item"])
-
-    return write_predictions(TASK3_TEST_FILE, preds, out_dir, data_dir)
+    model = StackedRating(
+        base=TimeBiasModel(**TASK3_TIME_PARAMS),
+        sources=[ItemKNN(), RatingStats(), SessionResidual()],
+        regressor=HistGradientBoostingRegressor(random_state=0),
+    ).fit(train)
+    
+    return write_predictions(TASK3_TEST_FILE, model.predict(test), out_dir, data_dir)

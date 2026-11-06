@@ -1,7 +1,7 @@
-# bpr.py
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+"""Bayesian Personalized Ranking (PML §5.2.2) via implicit: ranks items a user interacted with
+above items they didn't. Scores are unnormalized (item bias + γ_u · γ_i), used for ranking only."""
+
+from typing import Any, Self
 
 import numpy as np
 import pandas as pd
@@ -10,59 +10,50 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.sparse import csr_matrix
 
 
-@dataclass
-class BPRFit:
-    model: BayesianPersonalizedRanking
-    user_index: dict[str, int]  # user ID -> row in user_factors
-    item_index: dict[str, int]  # item ID -> row in item_factors
+class BPRModel:
+    """BPR fitted on every (user, item) row; score(users, items) gives one score per row."""
 
+    def __init__(self, seed: int = 0, **bpr_params: Any) -> None:
+        """bpr_params: factors, regularization, learning_rate, iterations (implicit kwargs)."""
+        self.seed = seed
+        self.bpr_params = bpr_params
+        self.model: BayesianPersonalizedRanking | None = None
 
-def fit_bpr(train_df: pd.DataFrame, seed: int = 0, **bpr_params: Any) -> BPRFit:
-    """Train implicit BPR on every (user, item) row of train_df."""
-    # 1. build user_index / item_index from train_df
-    # 2. build the sparse users x items matrix of 1s (csr_matrix((data, (rows, cols)), shape=...))
-    # 3. model = BayesianPersonalizedRanking(random_state=seed, num_threads=1, **bpr_params); model.fit(X)
-    user_index = {u: k for k, u in enumerate(train_df["user"].unique())}
-    item_index = {i: k for k, i in enumerate(train_df["item"].unique())}
-    # each interaction's user -> row number
-    rows = train_df["user"].map(user_index).to_numpy()
-    # each interaction's item -> column number
-    cols = train_df["item"].map(item_index).to_numpy()
-    data = np.ones(len(train_df), dtype=np.float32)  # a 1 at each (row, col)
+    def fit(self, train: pd.DataFrame) -> Self:
+        self.user_index = {u: k for k, u in enumerate(train["user"].unique())}
+        self.item_index = {i: k for k, i in enumerate(train["item"].unique())}
+        rows = train["user"].map(self.user_index).to_numpy()
+        cols = train["item"].map(self.item_index).to_numpy()
 
-    X = csr_matrix((data, (rows, cols)), shape=(len(user_index), len(item_index)))
-    X.data[:] = 1
+        X = csr_matrix((np.ones(len(train), dtype=np.float32), (rows, cols)),
+                       shape=(len(self.user_index), len(self.item_index)))
+        # repeat interactions count once
+        X.data[:] = 1
 
-    model = BayesianPersonalizedRanking(random_state=seed, num_threads=1, **bpr_params)
-    model.fit(X, show_progress=False)
-
-    return BPRFit(model, user_index, item_index)
-
-
-def bpr_scorer(
-    fit: BPRFit,
-) -> Callable[[ArrayLike, ArrayLike], NDArray[np.float64]]:
-    """Return score_fn(users, items) -> one BPR score per row, for calc_pair_accuracy."""
-
-    def score(users: NDArray, items: NDArray) -> NDArray[np.float64]:
-        # map IDs -> indices, gather factor rows, row-wise dot product
-        u_idx = pd.Series(users).map(fit.user_index)
-        i_idx = pd.Series(items).map(fit.item_index)
-
-        known = (u_idx.notna() & i_idx.notna()).to_numpy()
-
-        scores = np.zeros(len(users))
-
-        u_idx, i_idx = (
-            u_idx[known].astype(int).to_numpy(),
-            i_idx[known].astype(int).to_numpy(),
+        # num_threads=1 + random_state: deterministic fits, so make check reproduces dist/
+        self.model = BayesianPersonalizedRanking(
+            random_state=self.seed,
+            num_threads=1,
+            **self.bpr_params
         )
 
-        U = fit.model.user_factors[u_idx]
-        V = fit.model.item_factors[i_idx]
-        # row wise dot
-        scores[known] = (U * V).sum(axis=1)
+        self.model.fit(X, show_progress=False)
 
+        return self
+
+    def score(self, users: ArrayLike, items: ArrayLike) -> NDArray[np.float64]:
+        """Row-wise γ_u · γ_i (implicit stores the item bias as an extra factor); 0 if unknown."""
+        if self.model is None:
+            raise RuntimeError("BPRModel.score called before fit")
+        u_idx = pd.Series(users).map(self.user_index)
+        i_idx = pd.Series(items).map(self.item_index)
+        known = (u_idx.notna() & i_idx.notna()).to_numpy()
+
+        scores = np.zeros(len(u_idx))
+        U = self.model.user_factors[u_idx[known].astype(int).to_numpy()]
+        V = self.model.item_factors[i_idx[known].astype(int).to_numpy()]
+        scores[known] = (U * V).sum(axis=1)
         return scores
 
-    return score
+    # a fitted model *is* a scorer: calc_pair_accuracy(pairs, bpr)
+    __call__ = score

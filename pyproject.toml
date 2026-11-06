@@ -24,7 +24,12 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ipywidgets>=8.1.9", "nbconvert>=7.17.1", "ruff>=0.17.3"]
+dev = [
+    "ipywidgets>=8.1.9",
+    "jupytext>=1.19.6",
+    "nbconvert>=7.17.1",
+    "ruff>=0.17.3",
+]
 
 [project.scripts]
 assignment-1 = "assignment_1.cli:main"

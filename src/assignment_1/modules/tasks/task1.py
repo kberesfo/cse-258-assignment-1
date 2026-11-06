@@ -13,9 +13,16 @@ SVD (1 factor, reg_all 0.05, 50 epochs) 0.599; bias+SVD blend no gain (0.594). L
 did not improve on the biases.
 """
 
-import numpy as np
+from sklearn.ensemble import HistGradientBoostingRegressor
 
-from assignment_1.modules.models import fit_bias, predict_bias
+from assignment_1.modules.models import (
+    BiasModel,
+    ItemKNN,
+    RatingStats,
+    StackedRating,
+    adjusted_cosine,
+    jaccard,
+)
 from assignment_1.modules.util import drop_zero_ratings, load_csv, write_predictions
 
 TASK1_BIAS_PARAMS = {"reg_u": 1.0, "reg_i": 5.0, "n_epochs": 25}
@@ -25,15 +32,17 @@ TASK1_DROP_ZEROS = True
 
 
 def run_task1(data_dir=None, out_dir="dist"):
-    train = load_csv(TASK1_TRAIN_FILE, data_dir)
+    train = drop_zero_ratings(load_csv(TASK1_TRAIN_FILE, data_dir))
     test = load_csv(TASK1_TEST_FILE, data_dir)
 
-    if TASK1_DROP_ZEROS:
-        train = drop_zero_ratings(train)
+    model = StackedRating(
+        base=BiasModel(**TASK1_BIAS_PARAMS),
+        sources=[
+            ItemKNN(similarity=jaccard, prefix="knn_jac"),
+            ItemKNN(similarity=adjusted_cosine, prefix="knn_adj"),
+            RatingStats(),
+        ],
+        regressor=HistGradientBoostingRegressor(random_state=0),
+    ).fit(train)
 
-    model = fit_bias(train, **TASK1_BIAS_PARAMS)
-    preds = predict_bias(model, test["user"], test["item"])
-
-    preds = np.asarray(preds)
-
-    return write_predictions(TASK1_TEST_FILE, preds, out_dir, data_dir)
+    return write_predictions(TASK1_TEST_FILE, model.predict(test), out_dir, data_dir)
