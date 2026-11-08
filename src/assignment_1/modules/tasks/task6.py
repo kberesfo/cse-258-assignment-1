@@ -1,43 +1,58 @@
 """
-Task 6: time-delta prediction — how long (seconds) until the user's next interaction? Metric: MAE.
+Task 6: time-delta prediction. How long (seconds) until the user's next interaction?
+Metric: MAE (lower is better).
 
-Model: per-user median of each user's last 10 gaps between consecutive interactions, shrunk
-toward the global median gap in log space: log(pred) = w*log(user median) + (1-w)*log(global
-median), w = n_gaps / (n_gaps + 1.5). Trained on ALL of task_6_train.csv.
+Test design
+-----------
+One row per user, with the item of the next interaction. Metric confirmed as MAE (on validation
+the baseline's MAE matched the public baseline in scale; its MSE was orders of magnitude off).
+Gaps are heavily skewed (median ~13 days, mean ~71 days), so medians, not means: MAE is
+minimized by the median.
 
-Lower bound: the next book can't be read before it exists, so each prediction is raised to
-(item's first appearance in train - user's last interaction) where that is larger
-(np.fmax; no bound when the item never appears). Applies to ~13% of validation users.
-An upper bound from the end of the data hurt (corrupt future timestamps) and is not used.
+Model
+-----
+GapRegressor (time-series regression on the previous gaps, as suggested in lecture):
+HistGradientBoostingRegressor with MAE loss on log1p(gap). Since median(log g) = log(median g),
+fitting MAE in log space still estimates the median gap. Trained by stepping back one
+interaction per user (each user's last training gap is the target, earlier history gives the
+features). Features:
+  - the last 5 log gaps; log-gap median / mean / std / count; median of the last 10
+  - GapModel's prediction: per-user median of the last 10 gaps, shrunk toward the global median
+    in log space, log ĝ = w log m_u + (1 − w) log m, w = n_u / (n_u + 1.5)
+  - the item first-seen bound (days) and item popularity
+Lower bound, applied to the output: the next book can't be read before it first appears in
+training, so ĝ ≥ first_seen(item) − t_last(user) + 35 days (the median delay after a book first
+appears; applies to ~13% of users). An upper bound from the end of the data hurt (corrupt future
+timestamps), not used.
 
-Metric inferred as MAE: on validation the baseline's MAE (12.05M) matches the public baseline
-(13.56M) in scale, while its MSE (8e14) is eight orders of magnitude off. Gaps are heavily
-skewed (median 13 days, mean 71 days), so medians, not means, and shrinkage for users with few
-gaps account for most of the gain.
-
-Validation: each user's last gap held out, predicted from their earlier gaps
-(notebooks/task6.ipynb). Baseline per-user median 12,052,136 -> shrunk median of last 10 gaps
-(lam 1.5) 10,137,223 (+15.9%) -> + item first-appearance lower bound 8,531,601 (+29.2%).
-Public leaderboard before the bound: 13,013,427.
+Validation
+----------
+Each user's last training gap held out, predicted from the earlier history
+(notebooks/task6.ipynb):
+  per-user median 12,052,136 -> shrunk median, last 10 gaps (λ 1.5) 10,137,223 (−15.9%)
+  -> + first-seen bound 8,531,601 -> + 35-day offset, λ 2: ~8.43M
+  -> GapRegressor (base λ 1.5) 8,012,169 (−34% vs the baseline)
+Public: 13,013,427 -> 11,209,411 (bound + offset) -> <after upload> (GapRegressor).
 """
 
-from assignment_1.modules.models import GapModel
+from assignment_1.modules.models import SECONDS_PER_DAY, GapModel, GapRegressor
 from assignment_1.modules.util import load_csv, write_predictions
 
-TASK6_GAP_PARAMS = {"k": 10, "lam": 2.0}
+TASK6_GAP_PARAMS = {"k": 10, "lam": 1.5}
 
 TASK6_TRAIN_FILE = "task_6_train.csv"
 TASK6_TEST_FILE = "task_6_test.csv"
-TASK6_BOUND_OFFSET = 35 * 86400
+TASK6_BOUND_OFFSET = 35 * SECONDS_PER_DAY
 
 
 def run_task6(data_dir=None, out_dir="dist"):
     train = load_csv(TASK6_TRAIN_FILE, data_dir)
     test = load_csv(TASK6_TEST_FILE, data_dir)
 
-    model = GapModel(
-        **TASK6_GAP_PARAMS,
+    model = GapRegressor(
+        base=GapModel(
+            **TASK6_GAP_PARAMS
+        ),
         bound_offset=TASK6_BOUND_OFFSET
     ).fit(train)
-
     return write_predictions(TASK6_TEST_FILE, model.predict(test), out_dir, data_dir)

@@ -16,7 +16,7 @@ from .rating.bias import BiasModel
 from .rating.knn import ItemKNN
 from .rating.lfm import SVDModel
 from .rating.session import SessionResidual
-from .rating.stacking import FeatureSource, RatingStats, StackedRating
+from .rating.stacking import FeatureSource, RatingStats, StackedRating, ModelPrediction
 from .rating.time_bias import TimeBiasModel
 from .similarity import (
     ItemSimilarity,
@@ -25,7 +25,7 @@ from .similarity import (
     binary_cosine,
     jaccard,
 )
-from .time.gaps import GapModel
+from .time.gaps import GapModel, GapRegressor, split_last, SECONDS_PER_DAY
 
 __all__ = [
     # rating
@@ -37,6 +37,7 @@ __all__ = [
     "FeatureSource",
     "RatingStats",
     "StackedRating",
+    "ModelPrediction",
     "RatingModel",
     "SessionResidual",
     # ranking
@@ -52,6 +53,9 @@ __all__ = [
     "seen_by_user_rule"
     # time
     "GapModel",
+    "GapRegressor",
+    "split_last",
+    "SECONDS_PER_DAY",
     # similarity
     "ItemSimilarity",
     "Similarity",

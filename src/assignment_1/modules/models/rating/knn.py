@@ -22,14 +22,20 @@ class ItemKNN(FeatureSource):
     """
 
     def __init__(self, similarity: Similarity = binary_cosine, shrink: float = 1.0,
-                 prefix: str = "knn", chunk: int = 50_000) -> None:
-        self.similarity, self.shrink, self.prefix, self.chunk = similarity, shrink, prefix, chunk
+                 prefix: str = "knn", target: str = "residual", chunk: int = 50_000) -> None:
+        """target: "residual" averages r − b̂ (default); "rating" averages raw ratings r."""
+        if target not in ("residual", "rating"):
+            raise ValueError(
+                f"target must be 'residual' or 'rating', got {target!r}")
+        self.similarity, self.shrink, self.prefix = similarity, shrink, prefix
+        self.target, self.chunk = target, chunk
         self.sim: ItemSimilarity | None = None
 
     def fit(self, train: pd.DataFrame, base: RatingModel) -> Self:
         """train: rated rows the base model was fit on; base: a fitted RatingModel."""
-        res = train["rating"].to_numpy() - base.predict(train)
-        self.sim = ItemSimilarity(self.similarity).fit(train, residuals=res)
+        y = train["rating"].to_numpy(dtype=float)
+        vals = y - base.predict(train) if self.target == "residual" else y
+        self.sim = ItemSimilarity(self.similarity).fit(train, residuals=vals)
         return self
 
     def parts(self, rows: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
@@ -54,4 +60,9 @@ class ItemKNN(FeatureSource):
     def features(self, rows: pd.DataFrame) -> pd.DataFrame:
         num, den = self.parts(rows)
         p = self.prefix
-        return pd.DataFrame({p: num / (den + self.shrink), f"{p}_log_support": np.log1p(den)})
+        if self.target == "rating":                    # weighted average rating; NaN if no support
+            with np.errstate(invalid="ignore", divide="ignore"):
+                est = np.where(den > 0, num / den, np.nan)
+        else:                                          # shrunk residual correction
+            est = num / (den + self.shrink)
+        return pd.DataFrame({p: est, f"{p}_log_support": np.log1p(den)})

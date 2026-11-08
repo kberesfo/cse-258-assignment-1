@@ -94,3 +94,23 @@ class StackedRating(RatingModel):
         b, F = self._features(self.base_, self.sources_, rows)
 
         return np.clip(b + self.reg_.predict(F), *self.scale)
+
+class ModelPrediction(FeatureSource):
+    """Another rating model's prediction as a stacker feature (ensembling, as in lecture).
+
+    The model is fit on the same training rows as the stack's base, and its prediction becomes
+    one column. Pass an unfitted prototype; each fit works on a deep copy.
+    """
+
+    def __init__(self, model: RatingModel, name: str) -> None:
+        self.model, self.name = model, name
+        self.fitted: RatingModel | None = None
+
+    def fit(self, train: pd.DataFrame, base: RatingModel) -> Self:
+        self.fitted = copy.deepcopy(self.model).fit(train)
+        return self
+
+    def features(self, rows: pd.DataFrame) -> pd.DataFrame:
+        if self.fitted is None:
+            raise RuntimeError("ModelPrediction.features called before fit")
+        return pd.DataFrame({self.name: self.fitted.predict(rows)})
