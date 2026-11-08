@@ -81,6 +81,7 @@ def task2_pair_features(train_df: pd.DataFrame, pairs: pd.DataFrame) -> np.ndarr
     u = pairs["user"].to_numpy()
     d_small = small(u, pairs["item1"].to_numpy()) - \
         small(u, pairs["item2"].to_numpy())
+    
     return np.column_stack([X, d_small])
 
 
