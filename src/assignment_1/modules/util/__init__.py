@@ -1,4 +1,6 @@
 from .data import (
+    TS_MAX,
+    TS_MIN,
     clip_timestamps,
     data_path,
     drop_zero_ratings,
@@ -18,6 +20,8 @@ from .metrics import (
 from .validation import Holdout, make_pair_validation
 
 __all__ = [
+    "TS_MAX",
+    "TS_MIN",
     "Holdout",
     "calc_accuracy",
     "calc_bere",

@@ -13,10 +13,10 @@ from .ranking.rules import (
 )
 from .rating.base import RatingModel
 from .rating.bias import BiasModel
-from .rating.knn import ItemKNN
+from .rating.knn import ItemKNN, TopKItemKNN, UserKNN
 from .rating.lfm import SVDModel
-from .rating.session import SessionResidual
-from .rating.stacking import FeatureSource, RatingStats, StackedRating, ModelPrediction
+from .rating.session import SequenceResidual, SessionResidual
+from .rating.stacking import FeatureSource, ModelPrediction, RatingProfile, RatingStats, StackedRating
 from .rating.time_bias import TimeBiasModel
 from .similarity import (
     ItemSimilarity,
@@ -34,6 +34,10 @@ __all__ = [
     "fit_svd",
     "TimeBiasModel",
     "ItemKNN",
+    "TopKItemKNN",
+    "UserKNN",
+    "RatingProfile",
+    "SequenceResidual",
     "FeatureSource",
     "RatingStats",
     "StackedRating",

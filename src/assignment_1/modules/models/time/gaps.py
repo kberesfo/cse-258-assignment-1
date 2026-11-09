@@ -11,9 +11,9 @@ training, so ĝ ≥ first_seen(item) − t_last(user) + offset.
 GapRegressor: time-series regression on the user's previous gaps (lecture hint: predict
 delta_{n+1} from delta_1..n). A gradient-boosted regressor with MAE loss on log1p(gap); because
 median(log g) = log(median g), fitting MAE in log space still estimates the median. Features:
-the last n_lags log gaps, log-gap median / mean / std / count, GapModel's prediction, the
-first-seen bound and item popularity. Trained by stepping back one interaction (each user's last
-training gap is the target); the bound is applied to its output as a hard constraint.
+the user's previous gaps and recent activity, GapModel's prediction, and when other readers read
+the next book relative to the user's last interaction. Trained by stepping back one interaction
+(each user's last training gap is the target).
 
 All times are in seconds (SECONDS_PER_DAY = 86,400).
 """
@@ -26,7 +26,52 @@ from numpy.typing import NDArray
 from sklearn.base import clone
 from sklearn.ensemble import HistGradientBoostingRegressor
 
+from assignment_1.modules.util import TS_MAX, TS_MIN
+
 SECONDS_PER_DAY = 86_400
+# Just after the last clean timestamp (2017-11-01). Fixed, so the feature means the same on the
+# stepped-back history as on the full training set.
+GAP_DATA_END = pd.Timestamp("2017-11-05").timestamp()
+GAP_ITEM_QUANTILES = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90)
+GAP_WINDOWS_DAYS = (30, 90, 365)
+
+
+def _clean_timestamps(df: pd.DataFrame) -> pd.DataFrame:
+    """Rows with plausible timestamps; corrupt ones would swamp the time statistics."""
+    return df[df["timestamp"].between(TS_MIN, TS_MAX)]
+
+
+def _item_time_features(hist: pd.DataFrame, rows: pd.DataFrame, t: NDArray) -> pd.DataFrame:
+    """When the row's item was read by others, relative to the user's last interaction t (days).
+
+    The next interaction is after t, so the item's readers after t are the most informative.
+    NaN where the item is unknown (or, for the quantiles, has no reader after t).
+    """
+    by_item = {k: np.sort(v.to_numpy())
+               for k, v in _clean_timestamps(hist).groupby("item")["timestamp"]}
+    n_q, n_w = len(GAP_ITEM_QUANTILES), len(GAP_WINDOWS_DAYS)
+    out = np.full((len(rows), 6 + n_q + n_w), np.nan)
+    for n, (item, t_n) in enumerate(zip(rows["item"].to_numpy(), t, strict=True)):
+        times = by_item.get(item)
+        if times is None:
+            continue
+        j = np.searchsorted(times, t_n, side="right")
+        after = times[j:]
+        out[n, :6] = (len(times), len(after), len(after) / len(times),
+                      (times[0] - t_n) / SECONDS_PER_DAY, (times[-1] - t_n) / SECONDS_PER_DAY, j)
+        if len(after):
+            out[n, 6:6 + n_q] = (np.quantile(after, GAP_ITEM_QUANTILES) - t_n) / SECONDS_PER_DAY
+        for m, w in enumerate(GAP_WINDOWS_DAYS):
+            out[n, 6 + n_q + m] = np.searchsorted(after, t_n + w * SECONDS_PER_DAY, side="right")
+
+    F = pd.DataFrame(out, columns=[
+        "it_n", "it_after", "it_frac_after", "it_first", "it_last", "it_before",
+        *[f"it_q{int(q * 100)}" for q in GAP_ITEM_QUANTILES],
+        *[f"it_{w}" for w in GAP_WINDOWS_DAYS],
+    ])
+    counts = ["it_n", "it_after", "it_before", *[f"it_{w}" for w in GAP_WINDOWS_DAYS]]
+    F[counts] = np.log1p(F[counts])
+    return F
 
 
 def split_last(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -105,58 +150,88 @@ class GapRegressor:
     Model
     -----
     GapRegressor (time-series regression, as suggested in lecture): HistGradientBoostingRegressor
-    with MAE loss on log1p(gap), trained by stepping back one interaction per user. Features: the
-    last 5 log gaps, log-gap median / mean / std / count and median of the last 10, the GapModel
-    prediction (per-user median of the last 10 gaps, shrunk toward the global median in log space,
-    λ = 2), the item first-seen bound (days) and item popularity.
-    Lower bound, applied to the output: the next book can't be read before it first appears in
-    training, so ĝ ≥ first_seen(item) − t_last(user) + 35 days (the median delay after a book first
-    appears). An upper bound from the end of the data hurt (corrupt future timestamps), not used.
+    with MAE loss on log1p(gap), trained by stepping back one interaction per user. Features:
+    the user's last 8 log gaps and log-gap statistics, recent activity and calendar position, the
+    GapModel prediction, and the next book's interaction times relative to the user's last
+    interaction t (first / last reader, share and count of readers after t, quantiles of the
+    reader times after t, readers in the next 30 / 90 / 365 days).
+    These make the old hard lower bound (first_seen + 35 days) unnecessary; it now costs accuracy.
 
     Validation
     ----------
-    Each user's last training gap held out, predicted from the earlier history
-    (notebooks/task6.ipynb):
+    Each user's last training gap held out, predicted from the earlier history:
     per-user median 12,052,136 -> shrunk median, last 10 gaps (λ 1.5) 10,137,223
-    -> + first-seen bound 8,531,601 -> + 35-day offset, λ 2: <E4>
-    -> GapRegressor: <E5>
-    Public: 13,013,427 -> ~11.39M (bound) -> 11,209,411 (offset, λ 2) -> <after upload>.
+    -> + first-seen bound 8,531,601 -> first GapRegressor 8,012,169
+    -> + item reader times 7,183,000 (one step further back: 8,009,000 -> 7,191,000).
     """
 
-    def __init__(self, base: GapModel | None = None, n_lags: int = 5,
-                 bound_offset: float = 35 * SECONDS_PER_DAY, regressor=None) -> None:
-        self.base = base if base is not None else GapModel(k=10, lam=2.0)
+    def __init__(self, base: GapModel | None = None, n_lags: int = 8,
+                 bound_offset: float | None = None, regressor=None) -> None:
+        """bound_offset: apply ĝ ≥ first_seen − t_last + offset to the output; None for no bound."""
+        self.base = base if base is not None else GapModel(k=10, lam=1.5)
         self.n_lags, self.bound_offset = n_lags, bound_offset
         self.regressor = (regressor if regressor is not None
-                          else HistGradientBoostingRegressor(loss="absolute_error", random_state=0))
+                          else HistGradientBoostingRegressor(
+                              loss="absolute_error", learning_rate=0.03, max_iter=500,
+                              min_samples_leaf=40, random_state=0))
         self.reg_ = None
 
-    def features(self, hist: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
-        """Per-row features from `hist` (the user's previous gaps, the base model, the bound)."""
-        s = hist.sort_values(["user", "timestamp"], kind="stable")
-        s = s.assign(lg=np.log1p(s.groupby("user")[
-                     "timestamp"].diff())).dropna(subset=["lg"])
-        r = s.groupby("user").cumcount(
-            ascending=False)               # 0 = most recent gap
+    def _user_features(self, hist: pd.DataFrame, rows: pd.DataFrame) -> tuple[pd.DataFrame, NDArray]:
+        """(the user's gap and activity features, their last clean interaction time)."""
+        s = _clean_timestamps(hist).sort_values(["user", "timestamp"], kind="stable")
+        s = s.assign(gap=s.groupby("user")["timestamp"].diff())
+        gaps = s.dropna(subset=["gap"]).copy()
+        gaps["lg"] = np.log1p(gaps["gap"].clip(lower=0))
+        r = gaps.groupby("user").cumcount(ascending=False)         # 0 = most recent gap
+
         k = self.n_lags
-        lags = s[r < k].assign(r=r[r < k]).pivot(
-            index="user", columns="r", values="lg")
-        # always lag_0 … lag_{k−1}
-        lags = lags.reindex(columns=range(k))
+        lags = gaps[r < k].assign(r=r[r < k]).pivot(index="user", columns="r", values="lg")
+        lags = lags.reindex(columns=range(k))                      # always lag_0 … lag_{k−1}
         lags.columns = [f"lag_{c}" for c in range(k)]
-        stats = s.groupby("user")["lg"].agg(
-            ["median", "mean", "std", "count"]).add_prefix("lg_")
-        stats["lg_median10"] = s[r < 10].groupby("user")["lg"].median()
+        lg = gaps.groupby("user")["lg"]
+        stats = pd.DataFrame({
+            "lg_med": lg.median(), "lg_mean": lg.mean(), "lg_std": lg.std(), "lg_n": lg.size(),
+            "lg_q25": lg.quantile(0.25), "lg_q75": lg.quantile(0.75), "lg_max": lg.max(),
+        })
+        for n in (3, 5, 10, 20):
+            stats[f"lg_med{n}"] = gaps[r < n].groupby("user")["lg"].median()
 
         u = rows["user"]
         F = pd.concat([lags.reindex(u).reset_index(drop=True),
                        stats.reindex(u).reset_index(drop=True)], axis=1)
-        # no bound: it's a feature here
+
+        by_user = s.groupby("user")["timestamp"]
+        t = u.map(by_user.last()).to_numpy(dtype=float)
+        when = pd.to_datetime(t, unit="s")
+        F["t_last_yr"] = (t - TS_MIN) / (365.25 * SECONDS_PER_DAY)
+        F["span_d"] = np.log1p((t - u.map(by_user.first()).to_numpy(dtype=float)) / SECONDS_PER_DAY)
+        F["to_end_d"] = (GAP_DATA_END - t) / SECONDS_PER_DAY
+        F["t_month"], F["t_dow"] = when.month, when.dayofweek
+
+        times = {k: v.to_numpy() for k, v in by_user}
+        recent = np.zeros((len(u), len(GAP_WINDOWS_DAYS)))
+        for n, (user, t_n) in enumerate(zip(u.to_numpy(), t, strict=True)):
+            a = times.get(user)
+            if a is None or np.isnan(t_n):
+                continue
+            for m, w in enumerate(GAP_WINDOWS_DAYS):
+                recent[n, m] = len(a) - np.searchsorted(a, t_n - w * SECONDS_PER_DAY, side="left")
+        for m, w in enumerate(GAP_WINDOWS_DAYS):
+            F[f"recent_{w}"] = np.log1p(recent[:, m])
+
+        ratings = s.groupby("user")["rating"]
+        F["last_rating"] = u.map(ratings.last()).to_numpy(dtype=float)
+        F["mean_rating"] = u.map(ratings.mean()).to_numpy(dtype=float)
+        return F, t
+
+    def features(self, hist: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
+        """Per-row features from `hist`: the user's gaps and the next item's reader times."""
+        rows = rows.reset_index(drop=True)
+        F_user, t = self._user_features(hist, rows)
+        F = pd.concat([F_user, _item_time_features(hist, rows, t)], axis=1)
         base = copy.deepcopy(self.base).fit(hist)
         F["log_base"] = np.log1p(base.predict(rows))
         F["bound_days"] = base.bound(rows) / SECONDS_PER_DAY
-        F["log_item_pop"] = np.log1p(rows["item"].map(hist["item"].value_counts())
-                                     .fillna(0).to_numpy(dtype=float))
         return F
 
     def fit(self, train: pd.DataFrame) -> Self:
@@ -171,6 +246,8 @@ class GapRegressor:
             raise RuntimeError("GapRegressor.predict called before fit")
         F = self.features(self.train_, rows)
         pred = np.expm1(self.reg_.predict(F))
+        if self.bound_offset is None:
+            return pred
         bound = F["bound_days"].to_numpy() * SECONDS_PER_DAY
         # hard constraint; NaN -> keep pred
         return np.fmax(pred, bound + self.bound_offset)
