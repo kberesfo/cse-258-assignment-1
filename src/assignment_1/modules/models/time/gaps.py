@@ -74,6 +74,49 @@ def _item_time_features(hist: pd.DataFrame, rows: pd.DataFrame, t: NDArray) -> p
     return F
 
 
+def _coread_features(hist: pd.DataFrame, rows: pd.DataFrame, k: int = 1) -> pd.DataFrame:
+    """Readers of the row's item who also read one of the user's last k items (plan_t6.md P3).
+
+    For a co-reader v of history item a: the user read a at t_ua, v read the row's item
+    t_vb − t_va after a, so the implied next time is t_ua + (t_vb − t_va). Features, pooled over
+    the last k items: how many co-readers, the share whose implied time is after the user's last
+    interaction t, and quartiles of (implied − t) in log days. With k = 1, a is the last item and
+    the implied gap is just v's delay. NaN where nobody read both."""
+    s = (_clean_timestamps(hist).sort_values(["user", "timestamp"], kind="stable")
+         .drop_duplicates(["user", "item"], keep="last"))
+    recent = s.groupby("user").tail(k)
+    recent_items = {u: list(zip(v["item"].to_numpy(), v["timestamp"].to_numpy(), strict=True))
+                    for u, v in recent.groupby("user")[["item", "timestamp"]]}
+    t_last = s.groupby("user")["timestamp"].last()
+    readers = {i: dict(zip(v["user"].to_numpy(), v["timestamp"].to_numpy(), strict=True))
+               for i, v in s.groupby("item")[["user", "timestamp"]]}
+
+    out = np.full((len(rows), 5), np.nan)
+    users, items = rows["user"].to_numpy(), rows["item"].to_numpy()
+    for n, (user, b_item) in enumerate(zip(users, items, strict=True)):
+        b = readers.get(b_item)
+        hist_items = recent_items.get(user)
+        if b is None or hist_items is None:
+            continue
+        t_u = t_last[user]
+        implied = []
+        for a_item, t_ua in hist_items:
+            a = readers[a_item]
+            small, large, sign = (a, b, 1.0) if len(a) <= len(b) else (b, a, -1.0)
+            # d = t_vb − t_va for each co-reader v
+            implied.extend(t_ua - t_u + sign * (large[v] - t)
+                           for v, t in small.items() if v in large and v != user)
+        d = np.asarray(implied, dtype=float)
+        out[n, 0] = np.log1p(len(d))
+        if not len(d):
+            continue
+        after = d[d > 0] / SECONDS_PER_DAY
+        out[n, 1] = len(after) / len(d)
+        if len(after):
+            out[n, 2:] = np.log1p(np.quantile(after, (0.25, 0.5, 0.75)))
+    return pd.DataFrame(out, columns=["co_n", "co_frac_after", "co_q25", "co_med", "co_q75"])
+
+
 def split_last(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(history without each user's last interaction, that last row with its gap as `target`).
     Users whose last row has no previous interaction (a single row) are dropped from `last`."""
@@ -154,7 +197,8 @@ class GapRegressor:
     the user's last 8 log gaps and log-gap statistics, recent activity and calendar position, the
     GapModel prediction, and the next book's interaction times relative to the user's last
     interaction t (first / last reader, share and count of readers after t, quantiles of the
-    reader times after t, readers in the next 30 / 90 / 365 days).
+    reader times after t, readers in the next 30 / 90 / 365 days); optionally the co-readers'
+    implied delay to the next book from the user's last k books (coread).
     These make the old hard lower bound (first_seen + 35 days) unnecessary; it now costs accuracy.
 
     Validation
@@ -162,14 +206,26 @@ class GapRegressor:
     Each user's last training gap held out, predicted from the earlier history:
     per-user median 12,052,136 -> shrunk median, last 10 gaps (λ 1.5) 10,137,223
     -> + first-seen bound 8,531,601 -> first GapRegressor 8,012,169
-    -> + item reader times 7,183,000 (one step further back: 8,009,000 -> 7,191,000).
+    -> + item reader times 7,183,000 (one step further back: 8,009,000 -> 7,191,000)
+    -> + co-read delay, k = 5, 5 seeds 7,110,402 (one step further back 7,096,961).
     """
 
     def __init__(self, base: GapModel | None = None, n_lags: int = 8,
-                 bound_offset: float | None = None, regressor=None) -> None:
-        """bound_offset: apply ĝ ≥ first_seen − t_last + offset to the output; None for no bound."""
+                 bound_offset: float | None = None, regressor=None,
+                 coread: bool = False, coread_k: int = 1, n_bag: int = 1,
+                 scale: float = 1.0) -> None:
+        """bound_offset: apply ĝ ≥ first_seen − t_last + offset to the output; None for no bound.
+        Options from plan_t6.md (defaults reproduce the shipped model):
+          coread:    co-readers' implied delay to the row's item (_coread_features)
+          coread_k:  pool that delay over the user's last k items
+          n_bag:     regressors with different seeds, log predictions averaged
+          scale:     multiply predictions by this. The model learns from the gap one step
+                     before the one it predicts, and held-out gaps grow step by step (median
+                     43.9 → 49.1 days from backtest B to A), so it predicts too short."""
         self.base = base if base is not None else GapModel(k=10, lam=1.5)
         self.n_lags, self.bound_offset = n_lags, bound_offset
+        self.coread, self.coread_k, self.n_bag = coread, coread_k, n_bag
+        self.scale = scale
         self.regressor = (regressor if regressor is not None
                           else HistGradientBoostingRegressor(
                               loss="absolute_error", learning_rate=0.03, max_iter=500,
@@ -206,7 +262,7 @@ class GapRegressor:
         F["t_last_yr"] = (t - TS_MIN) / (365.25 * SECONDS_PER_DAY)
         F["span_d"] = np.log1p((t - u.map(by_user.first()).to_numpy(dtype=float)) / SECONDS_PER_DAY)
         F["to_end_d"] = (GAP_DATA_END - t) / SECONDS_PER_DAY
-        F["t_month"], F["t_dow"] = when.month, when.dayofweek
+        F["t_month"], F["t_dow"] = when.month, when.day_of_week
 
         times = {k: v.to_numpy() for k, v in by_user}
         recent = np.zeros((len(u), len(GAP_WINDOWS_DAYS)))
@@ -228,7 +284,10 @@ class GapRegressor:
         """Per-row features from `hist`: the user's gaps and the next item's reader times."""
         rows = rows.reset_index(drop=True)
         F_user, t = self._user_features(hist, rows)
-        F = pd.concat([F_user, _item_time_features(hist, rows, t)], axis=1)
+        parts = [F_user, _item_time_features(hist, rows, t)]
+        if self.coread:
+            parts.append(_coread_features(hist, rows, k=self.coread_k))
+        F = pd.concat(parts, axis=1)
         base = copy.deepcopy(self.base).fit(hist)
         F["log_base"] = np.log1p(base.predict(rows))
         F["bound_days"] = base.bound(rows) / SECONDS_PER_DAY
@@ -236,8 +295,15 @@ class GapRegressor:
 
     def fit(self, train: pd.DataFrame) -> Self:
         hist_b, last_b = split_last(train)
-        self.reg_ = clone(self.regressor).fit(self.features(hist_b, last_b),
-                                              np.log1p(last_b["target"].to_numpy()))
+        X, y = self.features(hist_b, last_b), np.log1p(last_b["target"].to_numpy())
+
+        self.regs_ = []
+        for b in range(self.n_bag):
+            reg = clone(self.regressor)
+            if b and "random_state" in reg.get_params():
+                reg.set_params(random_state=b)
+            self.regs_.append(reg.fit(X, y))
+        self.reg_ = self.regs_[0]
         self.train_ = train
         return self
 
@@ -245,7 +311,7 @@ class GapRegressor:
         if self.reg_ is None:
             raise RuntimeError("GapRegressor.predict called before fit")
         F = self.features(self.train_, rows)
-        pred = np.expm1(self.reg_.predict(F))
+        pred = self.scale * np.expm1(np.mean([reg.predict(F) for reg in self.regs_], axis=0))
         if self.bound_offset is None:
             return pred
         bound = F["bound_days"].to_numpy() * SECONDS_PER_DAY

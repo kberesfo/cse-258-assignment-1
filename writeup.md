@@ -67,10 +67,18 @@ regression on the user's previous gaps: a gradient-boosted regressor with MAE lo
 trained by stepping back one interaction per user. Inputs are the user's last eight gaps and gap
 statistics, a shrunk per-user median gap, and, since the test gives the next book, when other
 readers read that book relative to the user's last interaction (it can't be read before it first
-appears, and its later readers show when it was being read). MAE is minimized by the median, and
-the median is unchanged by the log transform, so the model still predicts a median gap while the
-log scale tames the skewed gaps (median 13 days, mean 71). Validation MAE: per-user median
-12.05M → 7.18M; public 13.01M (first submission) → 8.76M.
+appears, and its later readers show when it was being read). A co-reading feature adds
+book-to-book timing: for readers of one of the user's last five books who also read the next
+book, their delay between the two, shifted to the user's own reading times, implies when this
+user reaches it (series and books read back to back). Five seeds are averaged. MAE is minimized
+by the median, and the median is unchanged by the log transform, so the model still predicts a
+median gap while the log scale tames the skewed gaps (median 13 days, mean 71). One correction
+comes from how it is trained: the model learns from the gap one step before the one it predicts,
+and gaps lengthen toward the end of a user's history (held-out median 44 → 49 days from one step
+to the next), so its predictions run short; they are multiplied by 1.07, the best scale on
+validation (the best scale itself rose from 1.05 to 1.07 one step later). Validation MAE:
+per-user median 12.05M → 7.18M → 7.11M with co-reading (−1.0%) → −0.7% more with deeper trees
+(127 leaves) and the scale; public 13.01M (first submission) → 8.76M → 8.64M → 8.54M.
 
 **3. Rules from the test design.** Positives are held out of each user's training history, but
 decoys were sampled without excluding it, so a candidate already in the user's history is the
@@ -82,6 +90,10 @@ gives the next book.
 
 **4. What didn't work.** Latent factors (MF / SVD) never beat the bias model on ratings and
 added nothing as extra stack members; further similarity variants (Jaccard, top-k co-reading)
-saturated on Task 2; similarity to the user's most recent books and recency windows added
-nothing on Task 5; tuned boosting parameters alone moved MSE by under 0.001. Not tried: FPMC for
-Task 5 and user drift (α_u·dev_u(t), Koren) for Task 3.
+saturated on Task 2, as did similarity to the candidates in the user's other test rows (each
+holds one real book, but they are just a few more history items for users who already have ~60);
+similarity to the user's most recent books and recency windows added nothing on Task 5; tuned
+boosting parameters alone moved MSE by under 0.001. On Task 6, how quickly other readers reached
+the next book added nothing, and training on several held-out gaps per user made the model worse;
+seed-to-seed noise (~0.3%) is as large as the differences between co-reading variants. Not
+tried: FPMC for Task 5 and user drift (α_u·dev_u(t), Koren) for Task 3.

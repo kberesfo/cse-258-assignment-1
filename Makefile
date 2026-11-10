@@ -5,14 +5,21 @@
 #   make check     run the bundled file in a clean temp dir; confirm it reproduces dist/ exactly
 #   make submit    predict + bundle + check + writeup.txt -> everything to upload is in dist/
 #   make lint      ruff
+#
+# TASKS limits predict / check / changes to some tasks (default: all), e.g.
+#   make check TASKS=6        make predict TASKS="2 6"        make changes TASKS=6
+# Other tasks' files in dist/ are left as they are. submit always runs every task.
 
 RUN      ?= uv run
 DATA_DIR ?= data
 DIST     := dist
 CHECKDIR := $(DIST)/.check
 HIST     := $(DIST)_history
+TASKS    ?=
+# prediction files for the selected tasks (all when TASKS is empty)
+PRED_FILES = $(if $(strip $(TASKS)),$(foreach n,$(TASKS),$(DIST)/task_$(n)_predictions.csv),$(wildcard $(DIST)/task_*_predictions.csv))
 
-.PHONY: predict bundle check submit lint clean snapshot changes
+.PHONY: predict bundle check submit lint clean snapshot changes all-tasks
 
 # Copy the current predictions to dist_history/<timestamp>/ before they are overwritten.
 snapshot:
@@ -22,15 +29,15 @@ snapshot:
 	fi
 
 predict: snapshot
-	$(RUN) assignment-1 --data-dir $(DATA_DIR) --out-dir $(DIST)
+	$(RUN) assignment-1 $(TASKS) --data-dir $(DATA_DIR) --out-dir $(DIST)
 
 # Share of prediction rows that changed vs the most recent snapshot.
 changes:
 	@last=$$(ls -1d $(HIST)/*/ 2>/dev/null | sort | tail -1); \
 	if [ -z "$$last" ]; then echo "no snapshot yet"; exit 0; fi; \
 	echo "vs $$last"; \
-	for f in $(DIST)/task_*_predictions.csv; do \
-		p=$$last$$(basename $$f); [ -f $$p ] || continue; \
+	for f in $(PRED_FILES); do \
+		[ -f $$f ] || continue; p=$$last$$(basename $$f); [ -f $$p ] || continue; \
 		awk -v name=$$(basename $$f) 'NR==FNR{a[FNR]=$$0;next} a[FNR]!=$$0{c++} \
 			END{printf "  %-26s %6d / %d rows changed (%.2f%%)\n", name, c, FNR, 100*c/FNR}' $$p $$f; \
 	done
@@ -41,7 +48,7 @@ bundle:
 check: predict bundle
 	rm -rf $(CHECKDIR) && mkdir -p $(CHECKDIR)
 	cp $(DIST)/assignment1.py $(CHECKDIR)/
-	cd $(CHECKDIR) && $(RUN) python -I assignment1.py $(abspath $(DATA_DIR)) .
+	cd $(CHECKDIR) && $(RUN) python -I assignment1.py $(abspath $(DATA_DIR)) . $(TASKS)
 	@for f in $(CHECKDIR)/task_*_predictions.csv; do \
 		cmp -s $$f $(DIST)/$$(basename $$f) \
 			&& echo "check: $$(basename $$f) matches" \
@@ -49,7 +56,12 @@ check: predict bundle
 	done
 	rm -rf $(CHECKDIR)
 
-submit: check
+# submit uploads every file, so it refuses a partial run
+all-tasks:
+	@if [ -n "$(strip $(TASKS))" ]; then \
+		echo "submit: runs every task; unset TASKS (got TASKS=$(TASKS))"; exit 1; fi
+
+submit: all-tasks check
 	cp writeup.md $(DIST)/writeup.txt
 	@echo "Upload from $(DIST)/:" && ls -1 $(DIST)
 
