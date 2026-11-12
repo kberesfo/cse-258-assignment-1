@@ -17,6 +17,7 @@ time is the user's last training interaction (t_last), since the next item follo
   - item age and not-yet-seen, relative to t_last
   - trend: the item's share of interactions in t_last's time bin, at 20/50/100 quantile bins
   - log first-order transition count from the user's last item, and an unseen-in-train flag
+  - cosine similarity to the user's whole history (sum / max / mean)
 HistGradientBoostingClassifier is trained on feature differences (item1 - item2) for
 validation pairs, with base models fit on the reduced train. Test features come from base
 models refit on all of task_5_train.csv.
@@ -39,8 +40,9 @@ Each user's most recent interaction held out (Holdout.LAST), paired with a popul
 decoy; rows whose held-out item is unseen in the reduced train are dropped
 (notebooks/task5.ipynb). Accuracy on the held-out half of validation pairs:
   baseline BPR (5 factors) 0.8425 -> tuned BPR 0.8704 -> + trend/transition rules 0.8728
-  -> GB combiner 0.8932
-Public: rules 0.8703 -> combiner 0.8905 -> + seen-by-user rule 0.8945.
+  -> GB combiner 0.8932 -> + cosine 0.9029
+  Tried without gain: similarity to the user's most recent m items (m = 1–10), BPR K = 10.
+Public: rules 0.8703 -> combiner 0.8905 -> + seen-by-user rule 0.8945 -> + cosine 0.9030.
 Rule evidence: notebooks/rules.ipynb.
 """
 

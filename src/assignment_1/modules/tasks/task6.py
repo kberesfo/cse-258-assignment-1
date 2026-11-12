@@ -33,7 +33,7 @@ averaged, then × 1.07. The scale corrects a drift: the model learns from the ga
 the one it predicts, and held-out gaps lengthen toward the end of a history (median 43.9 days on
 backtest B, 49.1 on A; the test is one step later), so unscaled predictions are too short.
 The first-seen bound (first_seen(item) − t_last(user)) is a feature only: applied to the output
-as a hard floor (+ 35 days) it raises the error (<7.18M> -> <7.48M>).
+as a hard floor (+ 35 days) it raises the error (7,182,796 -> 7,480,674).
 
 Validation
 ----------
@@ -42,8 +42,8 @@ Each user's last training gap held out, predicted from the earlier history
   per-user median 12,052,136 -> shrunk median, last 10 gaps (λ 1.5) 10,137,223 (−15.9%)
   -> + first-seen bound and 35-day offset 8,531,601
   -> GapRegressor 8,012,169 (−33.5% vs the per-user median)
-  -> + the next book's reader times <7,183,xxx> (−10.4%; one step further back in time,
-     <8,009,xxx> -> <7,191,xxx>, −10.2%)
+  -> + the next book's reader times 7,182,796 (−10.4%; one step further back in time,
+     ≈8.01M -> 7,191,137, −10.2%)
   -> + co-read delay (last 5 books) and 5 seeds 7,110,402 (−1.0%; one step back 7,096,961,
      −1.3%) (notebooks/task6_improve.ipynb, task6_coread.ipynb). Seed-to-seed noise is ~0.3%,
      so k = 1 / 3 / 5 / 10 (−0.9% to −1.1%) are indistinguishable; other readers' gap into the
@@ -51,6 +51,11 @@ Each user's last training gap held out, predicted from the earlier history
   -> 127 leaves and × 1.07 (best scale 1.05 on B, 1.07 on A): −0.73% on A, −0.48% on B
      against the same 3 seeds (notebooks/task6_tune.ipynb, task6_scale.ipynb). Other settings
      (learning rate, leaf size, L2, max_features, no early stopping) moved < 0.1%.
+  Round 5 (notebooks/task6_round5.ipynb), not shipped: cosine similarity of the next book to the
+  user's last reads −0.20% (A) / −0.41% (B), + a cap at the data end −0.22% / −0.42%; one scale
+  per predicted-gap bucket won on A, lost on B. Error analysis: gaps over 90 days are 37% of
+  rows and 80% of the error, predicted at ~30–45% of their length (lapses the features cannot
+  foresee), while calibration by predicted gap is already within ±0.16 in log space.
 Public: 13,013,427 -> 11,209,411 (bound + offset) -> 10.65M (GapRegressor) -> 8.76M -> 8.64M (co-read, −1.4%)
   -> 8.54M (127 leaves, × 1.07; −1.1%).
 """

@@ -23,6 +23,8 @@ training history only, at the row's timestamp t:
     interactions nearest to t, by ±1/7/30-day window, nearest 1/3/10, and exp(−Δt/7d) decay.
     The held-out read sits among the user's other reads, so what they read around t is a
     stronger signal than the whole-history average (series, binge reading).
+  - EASE (Steck 2019, λ=25): closed-form item-item autoencoder weights, top 200 per item;
+    sum / max / mean over the user's history (ease_sum ≈ the EASE score).
 HistGradientBoostingClassifier is trained on feature differences (item1 - item2) for
 validation pairs, with base models fit on the reduced train. Test features come from base
 models refit on all of tasks_3_4_train.csv. The earlier hard not-yet-seen rule is now a
@@ -49,12 +51,17 @@ make_pair_validation(train, include_timestamp=True, seed=0): random held-out int
 with their timestamps, paired with popularity-sampled decoys that exclude the user's history
 (notebooks/task4.ipynb). Accuracy on the held-out half of validation pairs:
   BPR + not-yet-seen rule 0.8803 -> LR combiner 0.9018 -> GB combiner 0.9041
-  -> + cosine 0.9173 -> + time-local similarity 0.9218 (other half as training: 0.9176 -> 0.9237)
-Tried without gain (notebooks/task4_features.ipynb): weekday / hour / month affinity, LightFM
-score (BPR/WARP, with item and user side features; ≤ +0.0009), GB tuning (+0.0006).
-(trend at three resolutions beat a single 50-bin trend: GB 0.9026 -> 0.9041).
+  (trend at three resolutions beat a single 50-bin trend: GB 0.9026 -> 0.9041)
+  -> + cosine 0.9173 -> + time-local similarity 0.9218 -> + EASE 0.9242
+  (other half as training: 0.9176 -> 0.9237 -> 0.9246; notebooks/task4_features.ipynb,
+  notebooks/task4_ease.ipynb). Time-local similarity gained +0.005 for every neighbourhood
+  size and decay tried; EASE λ 10–100 all gave +0.0011 to +0.0017 (λ=25 best).
+Tried without gain (bar: +0.002 on both halves): weekday / hour / month affinity; LightFM
+score (BPR / WARP, with item and user side features; ≤ +0.0009); GB tuning (+0.0006); EASE
+over only the reads near t (≤ +0.0001 over EASE on the whole history).
 Public: BPR + rule 0.8706 -> GB combiner 0.8984 -> + seen-by-user rule 0.9172
-(predicted +1.97 from rules.ipynb; observed +1.88).
+(predicted +1.97 from rules.ipynb; observed +1.88) -> + cosine 0.9277
+-> + time-local similarity and EASE 0.9345.
 Rule evidence: notebooks/rules.ipynb.
 """
 
@@ -76,6 +83,7 @@ TASK4_BPR_PARAMS = {
     "learning_rate": 0.01,
     "iterations": 100,
 }
+TASK4_EASE_LAM = 25.0
 TASK4_TRAIN_FILE = "tasks_3_4_train.csv"
 TASK4_TEST_FILE = "task_4_test.csv"
 
@@ -83,7 +91,7 @@ TASK4_TEST_FILE = "task_4_test.csv"
 def task4_features() -> PairFeatures:
     """Unfitted feature builder; fit on tr for validation, on all of train for the test."""
     return PairFeatures(TASK4_BPR_PARAMS, similarity=binary_cosine, sim_prefix="cos",
-                        local_similarity=True)
+                        local_similarity=True, ease_lam=TASK4_EASE_LAM)
 
 
 def run_task4(data_dir=None, out_dir="dist"):

@@ -1,6 +1,6 @@
 # Task 2 plan: widen the 4.0 margin
 
-**Now:** public **0.9410** (4.0 cutoff 0.94, margin +0.001), validation 0.9383.
+**Now:** public **0.9454** (4.0 cutoff 0.94, margin +0.0054) after P6. Before: 0.9410, validation 0.9383.
 **Why new signal is needed:** the remaining tweaks in `plan.md` each give < 0.001, and small
 validation gains have shrunk by about two-thirds on public. Aim for **≥ +0.003 on validation**
 before uploading.
@@ -54,6 +54,32 @@ before uploading.
 ### P5. Combiner (low priority)
 - Once new features are in, retry gradient boosting with history length and popularity as
   interaction features. The errors are concentrated in low-confidence pairs.
+
+### P6. Task 4's wins (`notebooks/task2_t4ideas.ipynb`)
+Task 4 gained +0.007 public from time-local cosine + EASE (`plan_t4.md`).
+- **EASE global** (sum / max / mean of EASE weights over history), λ ∈ {10, 25, 100}.
+  51k items → float32 in-place inversion (`ease_similarity(..., dtype=np.float32)`), ~10-11 GB.
+  Covers P3's EASE item without the top-20k cut (top 30k would cover only 73% of test pairs).
+- **Time-local cosine without a row timestamp:** query time = the candidate's median (or 25th
+  percentile) read time; similarity to the user's 20 reads nearest it. Unlike span share
+  (no gain), this asks *what the user was reading* when the book was being read.
+- **Time-local EASE** at the same query time; then combinations.
+- Scored with LR (shipped), standardised LR and GB over 4 splits; `wins` counts splits.
+- **Results** (mean over 4 splits; baseline LR 0.9378):
+  | Block | Δ LR | Δ GB vs shipped LR |
+  |---|---|---|
+  | EASE global λ=10 / 25 / 100 | +0.0012 / +0.0011 / +0.0007 | +0.0021 / +0.0021 / +0.0022 |
+  | local cos @ item median / q25 | +0.0004 / +0.0005 | +0.0006 / +0.0006 |
+  | local cos n=5 / n=20 | +0.0003 / +0.0004 | +0.0005 / +0.0008 |
+  | local EASE λ=25 | +0.0001 | +0.0006 |
+  | **EASE λ=25 + local cos** | +0.0015 | **+0.0027** |
+  | + local EASE | +0.0015 | +0.0028 |
+- **Public: 0.9410 → 0.9454 (+0.0044)**, more than validation (+0.0027). Margin over 0.94:
+  0.001 → 0.0054.
+- **Shipped:** GB combiner + EASE λ=25 (float32) + local cos at the candidate's median time.
+  LR → GB because EASE gives trees interactions to use (LR +0.0015 vs GB +0.0027).
+  Just under the +0.003 aim; at Task 2's past shrink (~⅓ carries over) expect ~+0.001 public,
+  at Task 4's (~1:1) up to +0.0027.
 
 ## How to evaluate
 - Use the held-out half of validation pairs, on ≥ 3 seeds. Keep a change only if it wins on

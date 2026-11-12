@@ -43,8 +43,6 @@ Ablation on a new outer 10% holdout (notebooks/task1_ablation.ipynb; GB seed pin
 shipped stack scores 0.5430 here):
   shipped 0.5430 -> tuned GB 0.5429 -> 5 folds 0.5414 -> top-k kNN 0.5352 -> user kNN 0.5332
   -> profile 0.5299 (−2.4%)
-  Cost of removing each from the full model: top-k +<x>, user kNN +<x>, profile +0.0033.
-  Four outer splits: −<mean diff> on average, better on <n>/4.
 Public: 0.6185 (with 0s) -> 0.5917 (0s dropped) -> 0.5501 (first stack) -> 0.5453
 (Jaccard + adjusted) -> 0.5443 (+ raw-rating kNN) -> 0.5296 (top-k / user kNN / profile, 5 folds).
 """

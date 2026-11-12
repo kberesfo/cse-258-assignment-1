@@ -1,6 +1,7 @@
 # Task 6 plan: reach the 4.0 tier (MAE ≤ 8.5M) and move up from rank 140
 
-**Now:** public **8.76M** MAE (tier 3.5; 4.0 needs 8.5M, about −3%). Backtest A 7,182,796,
+**Now (2026-11-12):** public **8,542,010** (tier 3.5; 4.0 needs 8.5M: **−0.5%**). See round 5.
+**Before round 1:** public 8.76M MAE (tier 3.5; 4.0 needs 8.5M, about −3%). Backtest A 7,182,796,
 backtest B 7,191,137.
 **Model:** `GapRegressor`, gradient boosting with MAE loss on log1p(gap). Features: the user's
 gaps, the next book's reader times relative to the user's last interaction, and GapModel.
@@ -56,6 +57,77 @@ All are options on `GapRegressor`; the defaults reproduce the shipped model. To 
 - Look into the public/validation gap (8.76M vs 7.18M, 1.22×): are the test gaps later in
   calendar time? `to_end_d` is the feature that covers this.
 
+### Round 5: the last −0.5% (`notebooks/task6_round5.ipynb`)
+**Target:** public moved 1.1–1.4× the validation change (−1.4% vs −1.0%; −1.1% vs −0.73%), so
+**≈ −0.4% on backtest A**, also negative on B. That's about seed-noise size for one seed (~0.3%),
+so every comparison uses the same 5 seeds on cached features (paired), as in round 3.
+
+**Facts (checked 2026-11-12):**
+- Error is concentrated in long gaps: on backtest A, gaps > 365 days are 9.8% of rows but 50.5% of
+  total gap time; > 90 days are 36.7% of rows and 87.2%. Short-gap users barely move MAE.
+- The next book is never a re-read (0.00% of test and backtest rows): nothing to exploit.
+- 93.1% of test next books have other readers in train (median 45). Similarity features would
+  cover most rows; the co-read delay covers 63%.
+
+**R1. Diagnostics first (no model change)**
+- MAE share and median signed log error by true-gap bucket (< 30 d, 30–90, 90–365, > 365) and by
+  predicted-gap bucket. Is the 1.07 scale right everywhere, or are long predictions still short?
+- How often the prediction exceeds the time left in the data (`to_end_d`).
+- Error by segment: next book first appears after t_last (bound active) / co-read defined / not.
+
+**R2. Scale by predicted gap (post-hoc, cheapest)**
+- One scale per predicted-gap bucket (2–3 buckets), picked on B and checked on A, as round 4 did
+  for the single scale. Worth it only if R1 shows bias differs by bucket. Overfit risk: keep it
+  to ≤ 3 numbers and require the gain on both backtests.
+
+**R3. Similarity of the next book to the user's recent books (Tasks 2 / 4 lesson)**
+- Binary cosine between the next book and the user's last 1 / 3 / 10 books (max and mean), and
+  the EASE score of the next book over the whole history (`ease_similarity`, float32: 192k items
+  is too many for full EASE, so restrict to the top ~30k books or skip EASE).
+- Why it could help: in Task 4, similarity to the reads near t was the largest gain. A next book
+  that is close to the last few (series, same author) suggests binge reading and a short gap;
+  a distant one suggests a fresh start, possibly after a lapse. The co-read delay measures this
+  only when someone read both books; cosine covers 93% of rows.
+
+**R4. Cap at the end of the data**
+- If R1 finds predictions beyond `to_end_d`, clip them to it. The trees see `to_end_d`, but
+  bagging and the ×1.07 scale can push predictions past it. Hard rules have hurt before (the
+  first-seen floor), so keep only if it wins on both backtests.
+
+**R5. More seeds**
+- n_bag 5 → 10. Variance only; expect ≤ 0.1%. Last, on the final configuration.
+
+**Ship if** the combination wins on both backtests and is ≤ −0.4% on A (same seeds). Otherwise
+stop: Task 6 is a spare (best three are Tasks 1, 2, 3 at 4.0), so the gain is insurance only.
+
+**Round 5 results** (5 seeds, paired; reference = shipped: A 7,062,989, B 7,058,508)
+| Variant | Δ% A | Δ% B | Note |
+|---|---|---|---|
+| R2 2 buckets (60 d) | −0.09 | −0.00 | nothing |
+| R2 3 buckets (30 / 120 d) | −0.27 | **+0.07** | fails on B: per-bucket scales unstable (30–90 d: 1.17 on A, 1.05 on B) |
+| R3 similarity, all 16 cols | −0.17 | −0.34 | |
+| **R3 last-reads similarity only (13 cols)** | **−0.20** | **−0.41** | best; whole-history cosine adds noise |
+| R4 cap at data end | −0.01 | −0.00 | caps 0.03% / 0.00% of rows: the trees already respect `to_end_d` (first run NaN: 27 users without in-range timestamps; fixed with `np.fmin`) |
+| R5 all similarity, 10 seeds | −0.16 | −0.33 | = 5 seeds |
+| R6 last-reads + cap | **−0.22** | **−0.42** | best overall |
+| R6 last-reads, own scale (± cap) | −0.20 (−0.22) | −0.41 (−0.42) | best scale unchanged (A 1.075, B 1.05): no recalibration needed |
+| R5 last-reads, 10 seeds | −0.20 | −0.40 | = 5 seeds |
+
+**R1 findings:**
+- By true gap, 90+ day gaps are 37% of rows and 80% of the error (90–365 d: 33%; 365+ d: 47%),
+  predicted at ~45% / ~30% of the true gap (median log ratio −0.8 / −1.2). Gaps < 7 d are
+  overpredicted ~7× (+1.97). This is the median predictor meeting unpredictable lapses.
+- By predicted gap, calibration is good: median log ratio within ±0.16 in every bucket on both
+  backtests. No stable structure left for post-hoc scaling (R2).
+
+**Conclusion:** the remaining error is lapses the features cannot foresee. The best variant
+(−0.20% A) is half the −0.4% target: expected public ≈ 8.515–8.52M, still tier 3.5.
+**Stopped; nothing shipped.** The best variant (last-reads similarity + cap, −0.22% A /
+−0.42% B) is consistent but would give ≈ 8.52M public, still 3.5. Placement counts only for the
+best three tasks (1, 2, 3), so a better Task 6 rank earns nothing; not worth a code change and
+upload. If ever needed: 13 `loc_*` columns from `LocalSimilarity(binary_cosine)` queried just
+after t_last, fitted on the same history as the other features (`notebooks/task6_round5.ipynb`).
+
 ## How to evaluate
 - `notebooks/task6_improve.ipynb`: E1 shipped → E2 features → E3 steps → E4 bagging →
   E5 best on both backtests → E6 coverage and permutation importance.
@@ -79,6 +151,6 @@ All are options on `GapRegressor`; the defaults reproduce the shipped model. To 
 | round 4: best scale by leaves | 31: 1.06 · 63: 1.07 · 127: 1.07 · 255: 1.08 | 31: 1.035 · 63–255: 1.045–1.05 | | best scale grows B → A, as gaps do |
 | **shipped: + 127 leaves, × 1.07** | **−0.73% (7,064,960 at ×1.05)** | **−0.48%** | **8,542,010 (−1.1%)** | rank 107 → 76; 8.5M needs another −0.5% |
 
-**Outcome:** the co-read delay is a real but small gain (~1% on both backtests, every variant),
+**Outcome (round 2):** the co-read delay is a real but small gain (~1% on both backtests, every variant),
 short of the ~3% for 8.5M. `item_gaps` and `n_steps` were removed from the code. Public 8.76M → **8.64M**
 (−1.4%, a bit more than validation). Still tier 3.5; 8.5M needs another −1.6%.

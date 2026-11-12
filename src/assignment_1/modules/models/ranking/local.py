@@ -1,7 +1,8 @@
-"""Time-local item similarity (Task 4): how similar is a candidate to what the user was reading
-around the query time t? Global similarity features average over the whole history; this one
-looks only at the user's interactions nearest to t (before and after), which catches series
-and binge reading."""
+"""Time-local item similarity: how similar is a candidate to what the user was reading around
+the query time t? Global similarity features average over the whole history; this one looks
+only at the user's interactions nearest to t (before and after), which catches series and
+binge reading. Task 4 queries at the row's timestamp; Task 2 (no timestamp) at the candidate's
+median read time. Works with any Similarity, including ease_similarity."""
 
 from typing import Self
 
@@ -17,17 +18,18 @@ class LocalSimilarity:
     """
     For each (user, item, t): similarity of item to the user's 2·n_side training interactions
     nearest in time to t (n_side before, n_side after), summarised as
-      loc_w{w}_sum / _max   over neighbours within ±w days
-      loc_k{k}_mean / _max  over the k neighbours nearest in time
-      loc_decay             Σ s · exp(−|Δt| / τ days)
+      {prefix}_w{w}_sum / _max   over neighbours within ±w days
+      {prefix}_k{k}_mean / _max  over the k neighbours nearest in time
+      {prefix}_decay             Σ s · exp(−|Δt| / τ days)
     Unknown user or item → all zeros.
     """
 
     def __init__(self, similarity: Similarity = binary_cosine, n_side: int = 10,
                  windows: tuple[int, ...] = (1, 7, 30), k_near: tuple[int, ...] = (1, 3, 10),
-                 tau: float = 7.0) -> None:
+                 tau: float = 7.0, prefix: str = "loc") -> None:
         self.similarity, self.n_side = similarity, n_side
         self.windows, self.k_near, self.tau = windows, k_near, tau
+        self.prefix = prefix
 
     def fit(self, train: pd.DataFrame, sim: ItemSimilarity | None = None) -> Self:
         """sim: an ItemSimilarity already fitted on the same train (reused instead of refit)."""
@@ -63,15 +65,15 @@ class LocalSimilarity:
         s = np.asarray(self.S[np.repeat(i0, idx.shape[1]), h.ravel()]).reshape(idx.shape)
         s = np.where(valid, s, 0.0)
 
-        out = {}
+        out, p = {}, self.prefix
         for w in self.windows:
             sw = s * (dt <= w)
-            out[f"loc_w{w}_sum"] = sw.sum(1)
-            out[f"loc_w{w}_max"] = sw.max(1)
+            out[f"{p}_w{w}_sum"] = sw.sum(1)
+            out[f"{p}_w{w}_max"] = sw.max(1)
         s_near = np.take_along_axis(s, np.argsort(dt, axis=1, kind="stable"), 1)
         n_valid = valid.sum(1)
         for k in self.k_near:
-            out[f"loc_k{k}_mean"] = s_near[:, :k].sum(1) / np.clip(np.minimum(n_valid, k), 1, None)
-            out[f"loc_k{k}_max"] = s_near[:, :k].max(1)
-        out["loc_decay"] = (s * np.exp(-dt / self.tau)).sum(1)
+            out[f"{p}_k{k}_mean"] = s_near[:, :k].sum(1) / np.clip(np.minimum(n_valid, k), 1, None)
+            out[f"{p}_k{k}_max"] = s_near[:, :k].max(1)
+        out[f"{p}_decay"] = (s * np.exp(-dt / self.tau)).sum(1)
         return pd.DataFrame(out)

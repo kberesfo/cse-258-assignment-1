@@ -8,6 +8,7 @@ Order: shared modules (data, metrics, models/*) then tasks/task1..6, each under 
     * two modules defining the same top-level name
     * internal imports that rename (`as`) or import a module object (`from assignment_1 import data`)
 - Appends a __main__ block that runs every run_taskN(data_dir, out_dir).
+- Skips EXCLUDE: experiment-only modules no task uses (a task importing one fails the bundle).
 
 Usage: python scripts/bundle.py [out_path]
 """
@@ -23,6 +24,8 @@ SRC_PKG = (
 )  # package root (cli.py, __main__.py: not bundled)
 PKG = SRC_PKG / "modules"  # everything bundled lives here
 PKG_NAME = "assignment_1"
+# experiment-only modules, kept in the package for notebooks but not submitted
+EXCLUDE = {PKG / "models" / "ranking" / "lightFM.py"}  # LightFM: Task 4 notebook only
 
 
 def import_target(node, path):
@@ -85,7 +88,7 @@ def module_order():
     shared = sorted(
         p
         for p in PKG.rglob("*.py")
-        if p.name != "__init__.py" and tasks_dir not in p.parents
+        if p.name != "__init__.py" and tasks_dir not in p.parents and p not in EXCLUDE
     )
     tasks = sorted(
         (p for p in tasks_dir.glob("task*.py") if p.stem[4:].isdigit()),

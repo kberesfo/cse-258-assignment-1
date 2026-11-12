@@ -2,7 +2,7 @@
 
 Every statistic is fitted on one training set (tr for validation, all of train for the test).
 Query time is the row's timestamp when pairs have one (Task 4), else the user's last training
-interaction (Task 5).
+interaction (Tasks 2 and 5). The time-local similarity has its own query time (local_time).
 """
 
 from typing import Self
@@ -15,6 +15,7 @@ from assignment_1.modules.util import clip_timestamps, time_bin_edges, time_bins
 
 from ..similarity import ItemSimilarity, Similarity, binary_cosine
 from .bpr import BPRModel
+from .ease import ease_similarity
 from .local import LocalSimilarity
 from .markov import TransitionModel
 
@@ -25,7 +26,11 @@ class PairFeatures:
       bpr, not_yet, log_age, log_pop, trend_{nb} for each nb in trend_bins
       + trans, unseen                      if transitions=True (Task 5)
       + {sim_prefix}_sum / _max / _mean    if similarity is given
-      + loc_*                              if local_similarity=True (Task 4; see LocalSimilarity)
+      + loc_*                              if local_similarity=True (see LocalSimilarity); query time
+                                           = the row's time (local_time="row", Task 4) or the
+                                           candidate's median read time ("item_median", Task 2)
+      + ease_sum / _max / _mean            if ease_lam is given (EASE weights; ease_sum ≈ EASE score;
+                                           ease_dtype=np.float32 halves memory for many items)
     """
 
     def __init__(
@@ -36,6 +41,9 @@ class PairFeatures:
         similarity: Similarity | None = None,
         sim_prefix: str = "cos",
         local_similarity: bool = False,
+        ease_lam: float | None = None,
+        local_time: str = "row",
+        ease_dtype: type = np.float64,
     ) -> None:
         self.bpr_params = bpr_params
         self.trend_bins = trend_bins
@@ -43,6 +51,11 @@ class PairFeatures:
         self.similarity = similarity
         self.sim_prefix = sim_prefix
         self.local_similarity = local_similarity
+        self.ease_lam = ease_lam
+        if local_time not in ("row", "item_median"):
+            raise ValueError(f"local_time must be 'row' or 'item_median', not {local_time!r}")
+        self.local_time = local_time
+        self.ease_dtype = ease_dtype
         self.bpr: BPRModel | None = None
 
     def fit(self, train: pd.DataFrame) -> Self:
@@ -71,6 +84,11 @@ class PairFeatures:
         # reuses the fitted global similarity when it is the same measure
         self.local = (LocalSimilarity(self.similarity or binary_cosine).fit(train, sim=self.sim)
                       if self.local_similarity else None)
+        # item -> median interaction time (local query time when rows have no timestamp)
+        self.item_median = train.groupby("item")["timestamp"].median()
+        self.ease = (ItemSimilarity(ease_similarity(self.ease_lam, dtype=self.ease_dtype),
+                                    prefix="ease").fit(train)
+                     if self.ease_lam is not None else None)
         return self
 
     def query_times(self, pairs: pd.DataFrame) -> pd.Series:
@@ -108,7 +126,11 @@ class PairFeatures:
         if self.sim is not None:
             F = pd.concat([F, self.sim.features(users, items)], axis=1)
         if self.local is not None:
-            F = pd.concat([F, self.local.features(users, items, ts)], axis=1)
+            t_loc = (ts if self.local_time == "row"
+                     else items.map(self.item_median).fillna(self.t_max))
+            F = pd.concat([F, self.local.features(users, items, t_loc)], axis=1)
+        if self.ease is not None:
+            F = pd.concat([F, self.ease.features(users, items)], axis=1)
         return F
 
     def transform(self, pairs: pd.DataFrame) -> NDArray:

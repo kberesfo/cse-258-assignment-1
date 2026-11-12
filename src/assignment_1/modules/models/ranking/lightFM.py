@@ -1,3 +1,9 @@
+"""LightFM hybrid factorization machine (BPR / WARP loss, optional side features).
+
+Experiment only (notebooks/task4_features.ipynb): no task uses it. As a Task 4 feature it gave
+at most +0.0009, below the bar, and its multi-threaded training is not deterministic.
+"""
+
 import numpy as np
 from lightfm import LightFM
 from lightfm.data import Dataset

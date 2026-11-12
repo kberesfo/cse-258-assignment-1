@@ -1,7 +1,7 @@
 # Task 4 plan: feature engineering toward the 4.0 tier (acc ≥ 0.95)
 
-**Now:** public **0.9277** (tier 3.5; 4.0 needs 0.95, +0.022). Validation (GB on held-out half)
-**0.9173**.
+**Now:** public **0.9345** (tier 3.5; 4.0 needs 0.95, +0.0155). Was 0.9277 before this plan.
+Validation (GB on held-out half) 0.9173 → **0.9242**.
 **Model:** GB pairwise combiner on `PairFeatures` (BPR, not-yet-seen, age, popularity, trend
 20/50/100, cosine sum/max/mean) + seen-by-user rule.
 **Calibration:** additive validation gains carried over to public almost 1:1 so far
@@ -71,3 +71,28 @@ reverse) to tell signal from noise. A block is kept if it gains ≥ +0.002 in bo
 - Direction: separate before-t / after-t summaries (series order).
 - Candidate's reader timing: do other readers of the candidate read it close to the user's
   neighbouring items? (co-read *with time gap*, like Task 6's P3.)
+
+## Results (round 2: EASE, `notebooks/task4_ease.ipynb`)
+Baseline now includes cosine time-local similarity: 0.9218 / 0.9237 (mean 0.9227).
+| Block | A→B | B→A | Mean Δ |
+|---|---|---|---|
+| EASE exact score, λ=500 (1 col) | 0.9229 | 0.9239 | +0.0007 |
+| EASE global, λ=100 (3 cols) | 0.9236 | 0.9244 | **+0.0013** |
+| EASE global, λ=500 / 2000 | 0.9224 / 0.9221 | 0.9242 / 0.9237 | +0.0006 / +0.0002 |
+| EASE local, λ=100 / 500 / 2000 | 0.9227 / 0.9230 / 0.9217 | 0.9242 / 0.9242 / 0.9231 | +0.0007 / +0.0009 / −0.0003 |
+| EASE global + local, λ=100 / 500 | 0.9232 / 0.9230 | 0.9246 / 0.9246 | +0.0012 / +0.0011 |
+| global + local λ=500, keep 50 / 1000 | 0.9227 / 0.9228 | 0.9239 / 0.9245 | +0.0006 / +0.0009 |
+| global + local λ=500 + exact | 0.9234 | 0.9248 | +0.0014 |
+
+- Sparsified weights track the exact score (corr 0.98 at keep=200).
+| EASE global, λ=10 / 25 / 50 | 0.9235 / 0.9242 / 0.9235 | 0.9244 / 0.9246 / 0.9241 | +0.0013 / **+0.0017** / +0.0011 |
+
+- Plateau over λ 10–100 (+0.0011 to +0.0017), positive in both directions every time.
+- **Shipped:** global EASE λ=25 (`PairFeatures(..., ease_lam=25)`), 3 cols, ~45 s per fit.
+  Under the +0.002 bar but consistent; expect +0.0005 to +0.001 on public.
+- Unlike cosine, EASE's local version adds little over its global version: EASE already
+  learns which history items matter.
+
+## Public result
+0.9277 → **0.9345** (+0.0068) with time-local cosine + EASE λ=25. Validation predicted +0.0069
+(A→B 0.9173 → 0.9242): the additive carry-over held again.

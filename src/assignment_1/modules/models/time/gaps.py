@@ -207,7 +207,8 @@ class GapRegressor:
     per-user median 12,052,136 -> shrunk median, last 10 gaps (λ 1.5) 10,137,223
     -> + first-seen bound 8,531,601 -> first GapRegressor 8,012,169
     -> + item reader times 7,183,000 (one step further back: 8,009,000 -> 7,191,000)
-    -> + co-read delay, k = 5, 5 seeds 7,110,402 (one step further back 7,096,961).
+    -> + co-read delay, k = 5, 5 seeds 7,110,402 (one step further back 7,096,961)
+    -> 127 leaves and scale × 1.07: −0.73% on A, −0.48% one step back (same 3 seeds).
     """
 
     def __init__(self, base: GapModel | None = None, n_lags: int = 8,

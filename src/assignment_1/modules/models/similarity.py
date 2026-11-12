@@ -1,10 +1,12 @@
 """Item-item similarity over user interactions (PML §4.3).
 
-Shared by the ranking features (sum / max / mean similarity to a user's history) and the rating
-kNN (similarity-weighted residuals). A similarity is a function (R, Rres) -> S:
+Shared by the ranking features (sum / max / mean similarity to a user's history, and
+LocalSimilarity over the reads nearest a query time) and the rating kNN (similarity-weighted
+residuals). A similarity is a function (R, Rres) -> S:
     R:    user × item 0/1 history
     Rres: user × item residuals r − b̂ (only needed by rating-based measures)
-    S:    item × item similarity, diagonal zeroed
+    S:    item × item similarity, diagonal zeroed; S[candidate, history item]. The measures here
+          are symmetric; ranking/ease.py's ease_similarity is not.
 """
 
 from collections.abc import Callable

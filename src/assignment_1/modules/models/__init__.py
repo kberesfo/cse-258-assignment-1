@@ -1,6 +1,7 @@
 """Model families. Rating models (Tasks 1, 3) in rating/, ranking models and rules (Tasks 2, 4, 5) in ranking/."""
 
 from .ranking.bpr import BPRModel
+from .ranking.ease import EASE, ease_similarity
 from .ranking.local import LocalSimilarity
 from .ranking.markov import TransitionModel
 from .ranking.pairwise import PairFeatures
@@ -47,6 +48,8 @@ __all__ = [
     "SessionResidual",
     # ranking
     "BPRModel",
+    "EASE",
+    "ease_similarity",
     "LocalSimilarity",
     "TransitionModel",
     "PairFeatures",
