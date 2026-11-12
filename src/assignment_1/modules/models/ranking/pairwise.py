@@ -13,8 +13,9 @@ from numpy.typing import NDArray
 
 from assignment_1.modules.util import clip_timestamps, time_bin_edges, time_bins
 
-from ..similarity import ItemSimilarity, Similarity
+from ..similarity import ItemSimilarity, Similarity, binary_cosine
 from .bpr import BPRModel
+from .local import LocalSimilarity
 from .markov import TransitionModel
 
 
@@ -24,6 +25,7 @@ class PairFeatures:
       bpr, not_yet, log_age, log_pop, trend_{nb} for each nb in trend_bins
       + trans, unseen                      if transitions=True (Task 5)
       + {sim_prefix}_sum / _max / _mean    if similarity is given
+      + loc_*                              if local_similarity=True (Task 4; see LocalSimilarity)
     """
 
     def __init__(
@@ -32,13 +34,15 @@ class PairFeatures:
         trend_bins: tuple[int, ...] = (20, 50, 100),
         transitions: bool = False,
         similarity: Similarity | None = None,
-        sim_prefix: str = "cos"
+        sim_prefix: str = "cos",
+        local_similarity: bool = False,
     ) -> None:
         self.bpr_params = bpr_params
         self.trend_bins = trend_bins
         self.transitions = transitions
         self.similarity = similarity
         self.sim_prefix = sim_prefix
+        self.local_similarity = local_similarity
         self.bpr: BPRModel | None = None
 
     def fit(self, train: pd.DataFrame) -> Self:
@@ -64,6 +68,9 @@ class PairFeatures:
         self.trans = TransitionModel().fit(train) if self.transitions else None
         self.sim = (ItemSimilarity(self.similarity, prefix=self.sim_prefix).fit(train)
                     if self.similarity is not None else None)
+        # reuses the fitted global similarity when it is the same measure
+        self.local = (LocalSimilarity(self.similarity or binary_cosine).fit(train, sim=self.sim)
+                      if self.local_similarity else None)
         return self
 
     def query_times(self, pairs: pd.DataFrame) -> pd.Series:
@@ -100,6 +107,8 @@ class PairFeatures:
         F = pd.DataFrame(feats)
         if self.sim is not None:
             F = pd.concat([F, self.sim.features(users, items)], axis=1)
+        if self.local is not None:
+            F = pd.concat([F, self.local.features(users, items, ts)], axis=1)
         return F
 
     def transform(self, pairs: pd.DataFrame) -> NDArray:

@@ -1,6 +1,7 @@
 """Model families. Rating models (Tasks 1, 3) in rating/, ranking models and rules (Tasks 2, 4, 5) in ranking/."""
 
 from .ranking.bpr import BPRModel
+from .ranking.local import LocalSimilarity
 from .ranking.markov import TransitionModel
 from .ranking.pairwise import PairFeatures
 from .ranking.rules import (
@@ -46,6 +47,7 @@ __all__ = [
     "SessionResidual",
     # ranking
     "BPRModel",
+    "LocalSimilarity",
     "TransitionModel",
     "PairFeatures",
     # rules
@@ -54,7 +56,7 @@ __all__ = [
     "trend_rule",
     "transition_rule",
     "unseen_item_rule",
-    "seen_by_user_rule"
+    "seen_by_user_rule",
     # time
     "GapModel",
     "GapRegressor",

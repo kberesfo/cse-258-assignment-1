@@ -18,6 +18,11 @@ training history only, at the row's timestamp t:
   - item age at t (log days since first interaction)
   - log popularity
   - trend: the item's share of interactions in t's time bin, at 20/50/100 quantile bins
+  - cosine similarity to the user's whole history (sum / max / mean)
+  - time-local similarity (LocalSimilarity): cosine similarity to the user's 20 training
+    interactions nearest to t, by ±1/7/30-day window, nearest 1/3/10, and exp(−Δt/7d) decay.
+    The held-out read sits among the user's other reads, so what they read around t is a
+    stronger signal than the whole-history average (series, binge reading).
 HistGradientBoostingClassifier is trained on feature differences (item1 - item2) for
 validation pairs, with base models fit on the reduced train. Test features come from base
 models refit on all of tasks_3_4_train.csv. The earlier hard not-yet-seen rule is now a
@@ -44,6 +49,9 @@ make_pair_validation(train, include_timestamp=True, seed=0): random held-out int
 with their timestamps, paired with popularity-sampled decoys that exclude the user's history
 (notebooks/task4.ipynb). Accuracy on the held-out half of validation pairs:
   BPR + not-yet-seen rule 0.8803 -> LR combiner 0.9018 -> GB combiner 0.9041
+  -> + cosine 0.9173 -> + time-local similarity 0.9218 (other half as training: 0.9176 -> 0.9237)
+Tried without gain (notebooks/task4_features.ipynb): weekday / hour / month affinity, LightFM
+score (BPR/WARP, with item and user side features; ≤ +0.0009), GB tuning (+0.0006).
 (trend at three resolutions beat a single 50-bin trend: GB 0.9026 -> 0.9041).
 Public: BPR + rule 0.8706 -> GB combiner 0.8984 -> + seen-by-user rule 0.9172
 (predicted +1.97 from rules.ipynb; observed +1.88).
@@ -74,7 +82,8 @@ TASK4_TEST_FILE = "task_4_test.csv"
 
 def task4_features() -> PairFeatures:
     """Unfitted feature builder; fit on tr for validation, on all of train for the test."""
-    return PairFeatures(TASK4_BPR_PARAMS, similarity=binary_cosine, sim_prefix="cos")
+    return PairFeatures(TASK4_BPR_PARAMS, similarity=binary_cosine, sim_prefix="cos",
+                        local_similarity=True)
 
 
 def run_task4(data_dir=None, out_dir="dist"):
